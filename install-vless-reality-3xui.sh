@@ -445,18 +445,8 @@ find_xray_bin() {
   find "${XUI_DIR}/bin" -maxdepth 1 -type f -name 'xray-linux-*' -perm -111 | head -n 1
 }
 
-generate_reality_keys() {
-  [[ -n "${REALITY_SHORT_ID}" ]] || REALITY_SHORT_ID="$(random_hex 8)"
-
-  if [[ -n "${REALITY_PRIVATE_KEY}" && -n "${REALITY_PUBLIC_KEY}" ]]; then
-    return
-  fi
-
-  local xray_bin keys
-  xray_bin="$(find_xray_bin)"
-  [[ -n "${xray_bin}" ]] || die "未在 ${XUI_DIR}/bin 下找到内置 xray 程序。"
-
-  keys="$("${xray_bin}" x25519 2>&1)"
+parse_x25519_output() {
+  local keys="$1"
   REALITY_PRIVATE_KEY="$(awk -F':' '
     {
       label=tolower($1)
@@ -481,6 +471,40 @@ generate_reality_keys() {
       }
     }
   ' <<<"${keys}")"
+}
+
+generate_reality_keys() {
+  local base="${1:-}" cookie="${2:-}"
+  [[ -n "${REALITY_SHORT_ID}" ]] || REALITY_SHORT_ID="$(random_hex 8)"
+
+  if [[ -n "${REALITY_PRIVATE_KEY}" && -n "${REALITY_PUBLIC_KEY}" ]]; then
+    return
+  fi
+
+  local api_response xray_bin keys
+  if [[ -n "${base}" && -n "${cookie}" ]]; then
+    api_response="$(
+      curl -fsS -b "${cookie}" \
+        -H "X-Requested-With: XMLHttpRequest" \
+        "${base}panel/api/server/getNewX25519Cert" 2>/dev/null || true
+    )"
+    if jq -e '.success == true and .obj.privateKey and .obj.publicKey' >/dev/null 2>&1 <<<"${api_response}"; then
+      REALITY_PRIVATE_KEY="$(jq -r '.obj.privateKey' <<<"${api_response}")"
+      REALITY_PUBLIC_KEY="$(jq -r '.obj.publicKey' <<<"${api_response}")"
+      log "已通过 3x-ui 面板 API 生成 REALITY x25519 密钥"
+      return
+    fi
+    warn "3x-ui 面板 API 生成 x25519 密钥失败，将尝试 xray 命令。"
+  fi
+
+  xray_bin="$(find_xray_bin)"
+  [[ -n "${xray_bin}" ]] || die "未在 ${XUI_DIR}/bin 下找到内置 xray 程序。"
+
+  if ! keys="$("${xray_bin}" x25519 2>&1)"; then
+    die "执行 xray x25519 失败。xray 输出如下:
+${keys}"
+  fi
+  parse_x25519_output "${keys}"
 
   [[ -n "${REALITY_PRIVATE_KEY}" && -n "${REALITY_PUBLIC_KEY}" ]] || die "生成 REALITY x25519 密钥失败。xray 输出如下:
 ${keys}"
@@ -544,7 +568,13 @@ create_inbound() {
     die "节点端口 ${INBOUND_PORT} 已被占用。请设置 INBOUND_PORT=8443，或设置 ALLOW_USED_INBOUND_PORT=1 后重试。"
   fi
 
-  generate_reality_keys
+  local base cookie csrf
+  base="http://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/"
+  cookie="$(mktemp)"
+  trap 'rm -f "${cookie}"' RETURN
+  csrf="$(panel_login "${base}" "${cookie}")"
+
+  generate_reality_keys "${base}" "${cookie}"
   [[ -n "${SERVER_ADDR}" ]] || SERVER_ADDR="$(public_addr)"
 
   local clients_json links_json user_specs spec email days gb limit uuid sub_id exp total client link remark exp_text
@@ -588,7 +618,7 @@ create_inbound() {
     links_json="$(jq -c --arg email "${email}" --arg uuid "${uuid}" --arg link "${link}" --arg expiry "${exp_text}" '. + [{email:$email, uuid:$uuid, expiry:$expiry, link:$link}]' <<< "${links_json}")"
   done
 
-  local settings stream sniffing base cookie csrf add_response inbound_id
+  local settings stream sniffing add_response inbound_id
   settings="$(jq -cn --argjson clients "${clients_json}" '{clients:$clients,decryption:"none",fallbacks:[]}')"
   stream="$(
     jq -cn \
@@ -622,11 +652,6 @@ create_inbound() {
       }'
   )"
   sniffing='{"enabled":true,"destOverride":["http","tls","quic"],"metadataOnly":false,"routeOnly":false}'
-
-  base="http://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/"
-  cookie="$(mktemp)"
-  trap 'rm -f "${cookie}"' RETURN
-  csrf="$(panel_login "${base}" "${cookie}")"
 
   log "正在创建 VLESS REALITY Vision 节点，端口 ${INBOUND_PORT}"
   add_response="$(
