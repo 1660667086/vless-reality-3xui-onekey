@@ -35,6 +35,8 @@ ENABLE_BBR="${ENABLE_BBR:-1}"
 OPEN_FIREWALL="${OPEN_FIREWALL:-1}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
 ALLOW_USED_INBOUND_PORT="${ALLOW_USED_INBOUND_PORT:-0}"
+DISK_MIN_MB="${DISK_MIN_MB:-1024}"
+INSTALL_TMP=""
 
 red='\033[0;31m'
 green='\033[0;32m'
@@ -61,12 +63,14 @@ usage() {
   --no-bbr                不开启 BBR sysctl
   --no-firewall           不自动放行 ufw/firewalld 端口
   --force-reinstall       替换已有的 /usr/local/x-ui
+  --disk-min-mb MB        安装前要求的最小可用空间。默认 1024 MB
   -h, --help              显示帮助
 
 示例:
   sudo bash install-vless-reality-3xui.sh
   sudo env USERS='alice:30:100:2,bob:7:0:0' bash install-vless-reality-3xui.sh
   sudo env PANEL_PORT=25443 INBOUND_PORT=443 EXPIRE_DAYS=90 bash install-vless-reality-3xui.sh
+  sudo env DISK_MIN_MB=512 TMPDIR=/root bash install-vless-reality-3xui.sh
 EOF
 }
 
@@ -82,6 +86,14 @@ die() {
   echo -e "${red}[错误]${plain} $*" >&2
   exit 1
 }
+
+cleanup_install_tmp() {
+  if [[ -n "${INSTALL_TMP:-}" && -d "${INSTALL_TMP}" ]]; then
+    rm -rf "${INSTALL_TMP}"
+  fi
+}
+
+trap cleanup_install_tmp EXIT
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -99,6 +111,7 @@ parse_args() {
       --no-bbr) ENABLE_BBR=0; shift ;;
       --no-firewall) OPEN_FIREWALL=0; shift ;;
       --force-reinstall) FORCE_REINSTALL=1; shift ;;
+      --disk-min-mb) DISK_MIN_MB="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数: $1" ;;
     esac
@@ -111,6 +124,43 @@ require_root() {
 
 require_systemd() {
   command -v systemctl >/dev/null 2>&1 || die "当前脚本需要运行在 systemd Linux VPS 上。"
+}
+
+available_mb() {
+  local path="$1"
+  df -Pm "${path}" 2>/dev/null | awk 'NR==2 {print $4}'
+}
+
+require_space() {
+  local path="$1" need_mb="$2" label="$3" free_mb
+  free_mb="$(available_mb "${path}")"
+  [[ -n "${free_mb}" ]] || die "无法检查 ${label} 的磁盘空间: ${path}"
+  if (( free_mb < need_mb )); then
+    die "${label} 可用空间不足：当前 ${free_mb} MB，至少需要 ${need_mb} MB。
+请先在服务器执行 df -h 查看空间，必要时清理 /tmp、/var/cache/apt、旧日志或扩容磁盘后重试。"
+  fi
+}
+
+choose_tmp_parent() {
+  local candidate free_mb
+  for candidate in "${TMPDIR:-}" /var/tmp /root /tmp; do
+    [[ -n "${candidate}" && -d "${candidate}" && -w "${candidate}" ]] || continue
+    free_mb="$(available_mb "${candidate}")"
+    [[ -n "${free_mb}" ]] || continue
+    if (( free_mb >= DISK_MIN_MB )); then
+      echo "${candidate}"
+      return
+    fi
+  done
+  die "没有找到可用空间大于 ${DISK_MIN_MB} MB 的临时目录。可清理磁盘后重试，或指定 TMPDIR=/空间充足的目录。"
+}
+
+preflight_disk_space() {
+  [[ "${DISK_MIN_MB}" =~ ^[0-9]+$ ]] || die "DISK_MIN_MB 必须是数字，当前值: ${DISK_MIN_MB}"
+  require_space "/" "${DISK_MIN_MB}" "根分区"
+  if [[ -d /usr/local ]]; then
+    require_space "/usr/local" "${DISK_MIN_MB}" "/usr/local"
+  fi
 }
 
 valid_port() {
@@ -213,12 +263,14 @@ install_3xui() {
     return
   fi
 
-  local arch tmp pkg
+  local arch tmp_parent tmp pkg
   arch="$(detect_arch)"
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "${tmp}"' RETURN
+  tmp_parent="$(choose_tmp_parent)"
+  tmp="$(TMPDIR="${tmp_parent}" mktemp -d)"
+  INSTALL_TMP="${tmp}"
   pkg="${tmp}/x-ui-linux-${arch}.tar.gz"
 
+  log "临时目录: ${tmp}，最低空间要求: ${DISK_MIN_MB} MB"
   log "正在下载适用于 ${arch} 的最新版 3x-ui"
   curl -fL --retry 3 -o "${pkg}" "https://github.com/MHSanaei/3x-ui/releases/latest/download/x-ui-linux-${arch}.tar.gz"
 
@@ -243,6 +295,8 @@ install_3xui() {
 
   systemctl daemon-reload
   systemctl enable x-ui >/dev/null
+  cleanup_install_tmp
+  INSTALL_TMP=""
   log "3x-ui 已安装"
 }
 
@@ -525,6 +579,7 @@ main() {
   parse_args "$@"
   require_root
   require_systemd
+  preflight_disk_space
   install_packages
   set_defaults
   install_3xui

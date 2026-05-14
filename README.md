@@ -57,6 +57,12 @@ sudo env \
   bash install-vless-reality-3xui.sh
 ```
 
+如果 `/tmp` 分区很小，可以指定临时目录和最低空间要求：
+
+```bash
+sudo env TMPDIR=/root DISK_MIN_MB=512 bash install-vless-reality-3xui.sh
+```
+
 也可以用命令参数：
 
 ```bash
@@ -91,6 +97,31 @@ sudo bash install-vless-reality-3xui.sh --no-inbound
 - 默认面板是 HTTP 随机端口 + 随机路径；需要 HTTPS 面板证书时，在服务器运行 `x-ui`，进入 SSL Certificate Management。
 - 如果 `443` 已被 Nginx/Caddy/Apache 占用，把节点端口改成别的，例如 `INBOUND_PORT=8443`。
 - 请只在你拥有或被授权管理的服务器上使用，并遵守所在地法律和服务商条款。
+
+## 常见问题
+
+### No space left on device
+
+这是服务器磁盘空间不足。先检查：
+
+```bash
+df -h
+df -ih
+du -hxd1 / | sort -h
+du -hxd1 /var | sort -h
+du -hxd1 /root | sort -h
+```
+
+Ubuntu / Debian 可先尝试清理：
+
+```bash
+apt-get clean
+journalctl --vacuum-time=3d
+rm -rf /tmp/*
+rm -rf /var/tmp/*
+```
+
+清理后重新拉取最新版脚本再运行。
 
 ## 参考
 
