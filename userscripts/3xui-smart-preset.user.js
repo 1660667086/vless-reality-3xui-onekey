@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.2.1
+// @version      0.3.0
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
@@ -265,6 +265,14 @@
     return { certFile: '', keyFile: '' };
   }
 
+  function requireDefaultCert(protocol) {
+    const cert = getDefaultCertSettingsSync();
+    if (!cert.certFile || !cert.keyFile) {
+      throw new Error(`${protocol} 安全预设需要先在 3x-ui 面板设置默认 TLS 证书`);
+    }
+    return cert;
+  }
+
   function sniffingPreset(enabled = true) {
     return {
       enabled,
@@ -291,6 +299,19 @@
     }));
   }
 
+  function strongProxyAccounts(accounts) {
+    const source = Array.isArray(accounts) && accounts.length > 0 ? accounts : [{}];
+    return source.map((account) => ({
+      ...account,
+      user: typeof account.user === 'string' && account.user.length >= 8
+        ? account.user
+        : `u${randomSeq(12)}`,
+      pass: typeof account.pass === 'string' && account.pass.length >= 20
+        ? account.pass
+        : randomBase64Bytes(24),
+    }));
+  }
+
   function tlsSettingsPreset(alpn = ['h3'], cert = getDefaultCertSettingsSync()) {
     return {
       serverName: '',
@@ -312,6 +333,24 @@
       settings: {
         fingerprint: 'chrome',
         echConfigList: '',
+      },
+    };
+  }
+
+  function tlsTcpStreamPreset(cert) {
+    return {
+      network: 'tcp',
+      security: 'tls',
+      externalProxy: [],
+      tlsSettings: tlsSettingsPreset(['h2', 'http/1.1'], cert),
+      tcpSettings: {
+        acceptProxyProtocol: false,
+        header: { type: 'none' },
+      },
+      sockopt: {
+        acceptProxyProtocol: false,
+        tcpFastOpen: false,
+        tproxy: 'off',
       },
     };
   }
@@ -392,9 +431,9 @@
     const settings = parseJson(params.get('settings'), {});
     const stream = parseJson(params.get('streamSettings'), {});
     const picked = pickRealityTarget();
-    const cert = getDefaultCertSettingsSync();
+    const cert = requireDefaultCert('Hysteria2');
     settings.version = 2;
-    ensureClients(settings, (client) => ({ auth: client.auth || randomSeq(16) }));
+    ensureClients(settings, (client) => ({ auth: client.auth || randomSeq(24) }));
     stream.network = 'hysteria';
     stream.security = 'tls';
     stream.externalProxy = [];
@@ -402,7 +441,7 @@
     stream.hysteriaSettings = {
       protocol: 'udp',
       version: 2,
-      auth: randomSeq(16),
+      auth: randomBase64Bytes(32),
       udpIdleTimeout: 60,
       masquerade: {
         type: 'proxy',
@@ -418,37 +457,36 @@
     params.set('settings', JSON.stringify(settings));
     params.set('streamSettings', JSON.stringify(stream));
     params.set('sniffing', JSON.stringify(sniffingPreset()));
-    return cert.certFile
-      ? '已套用 Hysteria2 + TLS(h3) + Masquerade 推荐预设'
-      : '已套用 Hysteria2 + TLS(h3) + Masquerade 预设；未检测到默认证书时，请先在面板设置证书';
+    return '已套用 Hysteria2 + TLS(h3) + Masquerade + 强随机认证安全预设';
   }
 
   function applyShadowsocksPreset(params) {
     const settings = parseJson(params.get('settings'), {});
+    const cert = requireDefaultCert('Shadowsocks');
     settings.method = SS_METHOD;
     settings.password = randomSSPassword(SS_METHOD);
-    settings.network = 'tcp,udp';
+    settings.network = 'tcp';
     settings.ivCheck = true;
     ensureClients(settings, (client) => ({
       method: '',
       password: client.password && client.password.length > 20 ? client.password : randomSSPassword(SS_METHOD),
     }));
     params.set('settings', JSON.stringify(settings));
-    params.set('streamSettings', JSON.stringify(plainTcpStreamPreset()));
+    params.set('streamSettings', JSON.stringify(tlsTcpStreamPreset(cert)));
     params.set('sniffing', JSON.stringify(sniffingPreset()));
-    return '已套用 Shadowsocks 2022 + TCP/UDP + ivCheck 推荐预设';
+    return '已套用 Shadowsocks 2022 + TCP-only + TLS + ivCheck 安全预设';
   }
 
   function applyWireguardPreset(params) {
     const server = Wireguard.generateKeypair();
     const peer = Wireguard.generateKeypair();
     const settings = {
-      mtu: 1420,
+      mtu: 1280,
       secretKey: server.privateKey,
       peers: [{
         privateKey: peer.privateKey,
         publicKey: peer.publicKey,
-        allowedIPs: ['10.0.0.2/32'],
+        allowedIPs: ['10.66.66.2/32'],
         keepAlive: 25,
       }],
       noKernelTun: false,
@@ -456,55 +494,55 @@
     params.set('settings', JSON.stringify(settings));
     params.set('streamSettings', '');
     params.set('sniffing', JSON.stringify(sniffingPreset(false)));
-    return '已套用 WireGuard 自动密钥 + MTU 1420 + KeepAlive 预设';
+    return '已套用 WireGuard 自动密钥 + MTU 1280 + KeepAlive 安全预设';
   }
 
   function applyMixedPreset(params) {
     const settings = parseJson(params.get('settings'), {});
+    params.set('listen', '127.0.0.1');
     settings.auth = 'password';
-    settings.accounts = Array.isArray(settings.accounts) && settings.accounts.length > 0
-      ? settings.accounts
-      : [{ user: `u${randomSeq(8)}`, pass: randomSeq(16) }];
-    settings.udp = true;
+    settings.accounts = strongProxyAccounts(settings.accounts);
+    settings.udp = false;
     settings.ip = settings.ip || '127.0.0.1';
     params.set('settings', JSON.stringify(settings));
     params.set('streamSettings', '');
     params.set('sniffing', JSON.stringify(sniffingPreset()));
-    return '已套用 Mixed HTTP/SOCKS + 账号密码 + UDP 推荐预设';
+    return '已套用 Mixed 本地监听 127.0.0.1 + 强账号密码 + 关闭 UDP 安全预设';
   }
 
   function applyHttpPreset(params) {
     const settings = parseJson(params.get('settings'), {});
-    settings.accounts = Array.isArray(settings.accounts) && settings.accounts.length > 0
-      ? settings.accounts
-      : [{ user: `u${randomSeq(8)}`, pass: randomSeq(16) }];
+    params.set('listen', '127.0.0.1');
+    settings.accounts = strongProxyAccounts(settings.accounts);
     settings.allowTransparent = false;
     params.set('settings', JSON.stringify(settings));
     params.set('streamSettings', '');
     params.set('sniffing', JSON.stringify(sniffingPreset()));
-    return '已套用 HTTP 代理账号密码推荐预设';
+    return '已套用 HTTP 本地监听 127.0.0.1 + 强账号密码安全预设';
   }
 
   function applyTunnelPreset(params) {
     const settings = parseJson(params.get('settings'), {});
+    params.set('listen', '127.0.0.1');
     settings.rewriteAddress = settings.rewriteAddress || '127.0.0.1';
     settings.rewritePort = Number(settings.rewritePort) || 80;
     settings.portMap = settings.portMap && typeof settings.portMap === 'object' ? settings.portMap : {};
-    settings.allowedNetwork = settings.allowedNetwork || 'tcp,udp';
-    settings.followRedirect = settings.followRedirect ?? false;
+    settings.allowedNetwork = 'tcp';
+    settings.followRedirect = false;
     params.set('settings', JSON.stringify(settings));
     params.set('streamSettings', '');
     params.set('sniffing', JSON.stringify(sniffingPreset(false)));
-    return '已套用 Tunnel 可创建默认预设，目标默认 127.0.0.1:80';
+    return '已套用 Tunnel 本地监听 127.0.0.1 + TCP-only + 禁止透明转发安全预设';
   }
 
   function applyTunPreset(params) {
     const settings = parseJson(params.get('settings'), {});
+    params.set('listen', '127.0.0.1');
     settings.name = settings.name || 'xray0';
-    settings.mtu = Number(settings.mtu) || 1500;
+    settings.mtu = Number(settings.mtu) || 1280;
     settings.gateway = Array.isArray(settings.gateway) && settings.gateway.length > 0
       ? settings.gateway
-      : ['10.0.0.1/16'];
+      : ['10.66.0.1/16'];
     settings.dns = Array.isArray(settings.dns) && settings.dns.length > 0
       ? settings.dns
       : ['1.1.1.1', '8.8.8.8'];
@@ -516,7 +554,7 @@
     params.set('settings', JSON.stringify(settings));
     params.set('streamSettings', '');
     params.set('sniffing', JSON.stringify(sniffingPreset(false)));
-    return '已套用 TUN xray0 + DNS + MTU 1500 推荐预设';
+    return '已套用 TUN 本地监听 127.0.0.1 + MTU 1280 + DNS 安全预设';
   }
 
   function applySafeDefaults(params) {
@@ -594,6 +632,7 @@
         return rawSend.call(this, transformBody(body));
       } catch (e) {
         toast(`智能预设失败：${e.message}`, 'error');
+        throw e;
       }
     }
     return rawSend.apply(this, arguments);
@@ -609,6 +648,7 @@
           return rawFetch(input, { ...init, body: transformBody(init.body) });
         } catch (e) {
           toast(`智能预设失败：${e.message}`, 'error');
+          return Promise.reject(e);
         }
       }
       return rawFetch(input, init);
