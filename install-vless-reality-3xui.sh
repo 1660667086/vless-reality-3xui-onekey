@@ -215,6 +215,27 @@ detect_arch() {
   esac
 }
 
+select_service_file() {
+  local extracted_dir="$1"
+  if [[ -f "${extracted_dir}/x-ui.service" ]]; then
+    echo "${extracted_dir}/x-ui.service"
+    return
+  fi
+  if command -v apt-get >/dev/null 2>&1 && [[ -f "${extracted_dir}/x-ui.service.debian" ]]; then
+    echo "${extracted_dir}/x-ui.service.debian"
+    return
+  fi
+  if { command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; } && [[ -f "${extracted_dir}/x-ui.service.rhel" ]]; then
+    echo "${extracted_dir}/x-ui.service.rhel"
+    return
+  fi
+  if command -v pacman >/dev/null 2>&1 && [[ -f "${extracted_dir}/x-ui.service.arch" ]]; then
+    echo "${extracted_dir}/x-ui.service.arch"
+    return
+  fi
+  find "${extracted_dir}" -maxdepth 1 -type f -name 'x-ui.service*' | sort | head -n 1
+}
+
 install_packages() {
   log "正在安装依赖组件"
   if command -v apt-get >/dev/null 2>&1; then
@@ -263,7 +284,7 @@ install_3xui() {
     return
   fi
 
-  local arch tmp_parent tmp pkg
+  local arch tmp_parent tmp pkg service_file
   arch="$(detect_arch)"
   tmp_parent="$(choose_tmp_parent)"
   tmp="$(TMPDIR="${tmp_parent}" mktemp -d)"
@@ -286,11 +307,13 @@ install_3xui() {
 
   tar -xzf "${pkg}" -C "${tmp}"
   [[ -d "${tmp}/x-ui" ]] || die "3x-ui 发布包结构异常，无法继续安装。"
+  service_file="$(select_service_file "${tmp}/x-ui")"
+  [[ -n "${service_file}" && -f "${service_file}" ]] || die "未在 3x-ui 发布包中找到 systemd service 文件。"
 
   chmod +x "${tmp}/x-ui/x-ui" "${tmp}"/x-ui/bin/xray-linux-* "${tmp}/x-ui/x-ui.sh"
   cp -f "${tmp}/x-ui/x-ui.sh" /usr/bin/x-ui
   chmod +x /usr/bin/x-ui
-  cp -f "${tmp}/x-ui/x-ui.service" "${XUI_SERVICE_FILE}"
+  cp -f "${service_file}" "${XUI_SERVICE_FILE}"
   mv "${tmp}/x-ui" "${XUI_DIR}"
 
   systemctl daemon-reload
