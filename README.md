@@ -10,12 +10,44 @@
 sudo bash install-vless-reality-3xui.sh
 ```
 
+默认安装源是你自己仓库的 GitHub Release 镜像，不会直接从 3x-ui 官方上游下载面板安装包：
+
+- 镜像仓库：`1660667086/vless-reality-3xui-onekey`
+- 镜像 Release：`3x-ui-v3.0.2`
+- 安装包格式：`x-ui-linux-<架构>.tar.gz`
+
 安装完成后会输出：
 
 - 3x-ui 面板地址、用户名、密码
 - 入站节点端口、REALITY 公钥、short ID
 - 每个用户的 `vless://` 分享链接
 - 结果备份文件：`/root/3x-ui-reality-install-*.txt`
+
+## 独立安装和上游更新
+
+日常安装默认走你自己的镜像：
+
+```bash
+sudo bash install-vless-reality-3xui.sh
+```
+
+检查官方 3x-ui 上游是否有新版本：
+
+```bash
+sudo bash install-vless-reality-3xui.sh --check-upstream-update
+```
+
+确认要更新面板程序时，才从官方上游下载最新版并安装：
+
+```bash
+sudo bash install-vless-reality-3xui.sh --update-3xui
+```
+
+如果你临时想绕过镜像、直接用官方上游安装，也可以显式指定：
+
+```bash
+sudo env INSTALL_SOURCE=upstream bash install-vless-reality-3xui.sh
+```
 
 ## 多用户和到期时间
 

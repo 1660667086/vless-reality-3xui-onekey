@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.2.0
+// @version      0.2.1
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
 // @match        http://*/*/panel/inbounds*
 // @match        https://*/*/panel/inbounds*
+// @downloadURL  https://raw.githubusercontent.com/1660667086/vless-reality-3xui-onekey/main/userscripts/3xui-smart-preset.user.js
+// @updateURL    https://raw.githubusercontent.com/1660667086/vless-reality-3xui-onekey/main/userscripts/3xui-smart-preset.user.js
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==

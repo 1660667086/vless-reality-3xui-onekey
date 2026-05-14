@@ -43,6 +43,14 @@ SWAP_THRESHOLD_MB="${SWAP_THRESHOLD_MB:-1024}"
 SWAP_FILE="${SWAP_FILE:-/swapfile}"
 INSTALL_TMP=""
 
+SELF_REPO="${SELF_REPO:-1660667086/vless-reality-3xui-onekey}"
+MIRROR_3XUI_REPO="${MIRROR_3XUI_REPO:-${SELF_REPO}}"
+MIRROR_3XUI_TAG="${MIRROR_3XUI_TAG:-3x-ui-v3.0.2}"
+UPSTREAM_3XUI_REPO="${UPSTREAM_3XUI_REPO:-MHSanaei/3x-ui}"
+INSTALL_SOURCE="${INSTALL_SOURCE:-mirror}"
+CHECK_UPSTREAM_UPDATE="${CHECK_UPSTREAM_UPDATE:-0}"
+UPDATE_3XUI="${UPDATE_3XUI:-0}"
+
 red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
@@ -74,6 +82,12 @@ usage() {
   --swap-size-mb MB       自动创建 swap 的大小。默认 1024 MB
   --swap-threshold-mb MB  内存低于该值且无 swap 时自动创建。默认 1024 MB
   --swap-file PATH        swap 文件路径。默认 /swapfile
+  --install-source SRC    3x-ui 安装包来源: mirror 或 upstream。默认 mirror
+  --mirror-repo REPO      自建 3x-ui 镜像仓库。默认 1660667086/vless-reality-3xui-onekey
+  --mirror-tag TAG        自建 3x-ui 镜像 Release tag。默认 3x-ui-v3.0.2
+  --upstream-repo REPO    3x-ui 上游仓库。默认 MHSanaei/3x-ui
+  --check-upstream-update 只检查官方 3x-ui 是否有新版本，不安装
+  --update-3xui           从官方 3x-ui 上游下载最新版并更新面板程序
   -h, --help              显示帮助
 
 示例:
@@ -82,6 +96,8 @@ usage() {
   sudo env PANEL_PORT=25443 INBOUND_PORT=443 EXPIRE_DAYS=90 bash install-vless-reality-3xui.sh
   sudo env DISK_MIN_MB=512 TMPDIR=/root bash install-vless-reality-3xui.sh
   sudo env INBOUND_PORT=8443 USERS='newuser:30:100:2' bash install-vless-reality-3xui.sh --preset-only
+  sudo bash install-vless-reality-3xui.sh --check-upstream-update
+  sudo bash install-vless-reality-3xui.sh --update-3xui
 EOF
 }
 
@@ -128,6 +144,12 @@ parse_args() {
       --swap-size-mb) SWAP_SIZE_MB="$2"; shift 2 ;;
       --swap-threshold-mb) SWAP_THRESHOLD_MB="$2"; shift 2 ;;
       --swap-file) SWAP_FILE="$2"; shift 2 ;;
+      --install-source) INSTALL_SOURCE="$2"; shift 2 ;;
+      --mirror-repo) MIRROR_3XUI_REPO="$2"; shift 2 ;;
+      --mirror-tag) MIRROR_3XUI_TAG="$2"; shift 2 ;;
+      --upstream-repo) UPSTREAM_3XUI_REPO="$2"; shift 2 ;;
+      --check-upstream-update) CHECK_UPSTREAM_UPDATE=1; shift ;;
+      --update-3xui) UPDATE_3XUI=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数: $1" ;;
     esac
@@ -338,6 +360,94 @@ install_packages() {
   fi
 }
 
+validate_release_source() {
+  case "${INSTALL_SOURCE}" in
+    mirror|upstream) ;;
+    *) die "INSTALL_SOURCE 只能是 mirror 或 upstream，当前值: ${INSTALL_SOURCE}" ;;
+  esac
+  [[ "${MIRROR_3XUI_REPO}" == */* ]] || die "MIRROR_3XUI_REPO 格式应为 owner/repo，当前值: ${MIRROR_3XUI_REPO}"
+  [[ -n "${MIRROR_3XUI_TAG}" ]] || die "MIRROR_3XUI_TAG 不能为空"
+  [[ "${UPSTREAM_3XUI_REPO}" == */* ]] || die "UPSTREAM_3XUI_REPO 格式应为 owner/repo，当前值: ${UPSTREAM_3XUI_REPO}"
+}
+
+github_download_url() {
+  local repo="$1" tag="$2" asset="$3"
+  if [[ "${tag}" == "latest" ]]; then
+    echo "https://github.com/${repo}/releases/latest/download/${asset}"
+  else
+    echo "https://github.com/${repo}/releases/download/${tag}/${asset}"
+  fi
+}
+
+latest_upstream_tag() {
+  curl -fsSL --retry 3 "https://api.github.com/repos/${UPSTREAM_3XUI_REPO}/releases/latest" | jq -r '.tag_name'
+}
+
+local_3xui_version() {
+  if [[ -x "${XUI_BIN}" ]]; then
+    "${XUI_BIN}" -v 2>/dev/null | awk 'NF {print $1; exit}' || true
+  fi
+}
+
+version_gt() {
+  local newer="${1#v}" current="${2#v}"
+  [[ -n "${newer}" && -n "${current}" ]] || return 1
+  [[ "$(printf '%s\n%s\n' "${current}" "${newer}" | sort -V | tail -n 1)" == "${newer}" && "${newer}" != "${current}" ]]
+}
+
+check_upstream_update() {
+  require_basic_tools
+  local current latest
+  current="$(local_3xui_version)"
+  latest="$(latest_upstream_tag)"
+  [[ -n "${latest}" && "${latest}" != "null" ]] || die "无法读取上游 ${UPSTREAM_3XUI_REPO} 最新版本。"
+
+  echo "当前本机 3x-ui 版本: ${current:-未安装或无法识别}"
+  echo "官方上游最新版本: ${latest}"
+  if [[ -n "${current}" ]] && version_gt "${latest}" "${current}"; then
+    warn "发现新版本。执行下面命令可从上游更新:"
+    echo "sudo bash install-vless-reality-3xui.sh --update-3xui"
+  elif [[ -n "${current}" ]]; then
+    log "当前已是最新或不低于上游最新版本。"
+  else
+    warn "未检测到本机 3x-ui。默认安装仍会使用你自己的镜像源。"
+  fi
+}
+
+download_3xui_package() {
+  local source="$1" arch="$2" pkg="$3" asset url tag repo
+  asset="x-ui-linux-${arch}.tar.gz"
+  case "${source}" in
+    mirror)
+      repo="${MIRROR_3XUI_REPO}"
+      tag="${MIRROR_3XUI_TAG}"
+      url="$(github_download_url "${repo}" "${tag}" "${asset}")"
+      log "正在从你的独立镜像下载 3x-ui: ${repo}@${tag}/${asset}"
+      ;;
+    upstream)
+      repo="${UPSTREAM_3XUI_REPO}"
+      tag="latest"
+      url="$(github_download_url "${repo}" "${tag}" "${asset}")"
+      log "正在从官方上游下载最新版 3x-ui: ${repo}/${asset}"
+      ;;
+    *)
+      die "未知 3x-ui 下载源: ${source}"
+      ;;
+  esac
+
+  if ! curl -fL --retry 3 -o "${pkg}" "${url}"; then
+    if [[ "${source}" == "mirror" ]]; then
+      die "从你的镜像源下载 3x-ui 失败。
+请确认 GitHub Release 存在并包含 ${asset}:
+  https://github.com/${repo}/releases/tag/${tag}
+
+如果你是临时想直接走官方上游，可以显式执行:
+  sudo env INSTALL_SOURCE=upstream bash install-vless-reality-3xui.sh"
+    fi
+    die "从官方上游下载 3x-ui 失败: ${url}"
+  fi
+}
+
 set_defaults() {
   if [[ "${PRESET_ONLY}" == "1" ]]; then
     load_panel_result
@@ -390,6 +500,7 @@ public_addr() {
 }
 
 install_3xui() {
+  local source="${1:-${INSTALL_SOURCE}}"
   if [[ -x "${XUI_BIN}" && "${FORCE_REINSTALL}" != "1" ]]; then
     warn "检测到已安装 3x-ui: ${XUI_DIR}，本次会复用它。如需覆盖安装，请设置 FORCE_REINSTALL=1。"
     return
@@ -403,8 +514,7 @@ install_3xui() {
   pkg="${tmp}/x-ui-linux-${arch}.tar.gz"
 
   log "临时目录: ${tmp}，最低空间要求: ${DISK_MIN_MB} MB"
-  log "正在下载适用于 ${arch} 的最新版 3x-ui"
-  curl -fL --retry 3 -o "${pkg}" "https://github.com/MHSanaei/3x-ui/releases/latest/download/x-ui-linux-${arch}.tar.gz"
+  download_3xui_package "${source}" "${arch}" "${pkg}"
 
   if systemctl list-unit-files | grep -q '^x-ui\.service'; then
     systemctl stop x-ui >/dev/null 2>&1 || true
@@ -759,10 +869,26 @@ write_result() {
 
 main() {
   parse_args "$@"
+  validate_release_source
+
+  if [[ "${CHECK_UPSTREAM_UPDATE}" == "1" ]]; then
+    check_upstream_update
+    return
+  fi
+
   require_root
   require_systemd
   preflight_disk_space
   ensure_auto_swap
+
+  if [[ "${UPDATE_3XUI}" == "1" ]]; then
+    install_packages
+    FORCE_REINSTALL=1
+    install_3xui upstream
+    systemctl restart x-ui
+    log "3x-ui 已从官方上游更新完成。默认安装源仍是你的独立镜像。"
+    return
+  fi
 
   if [[ "${PRESET_ONLY}" == "1" ]]; then
     require_basic_tools
