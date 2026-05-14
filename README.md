@@ -51,6 +51,23 @@ sudo env INBOUND_PORT=8443 USERS='newuser:30:100:2' \
   bash install-vless-reality-3xui.sh --preset-only
 ```
 
+### 面板弹窗自动预设
+
+如果你希望像 3x-ui 原生功能一样：在“添加入站”弹窗里选协议，然后直接点“创建”，可以在浏览器安装：
+
+```text
+userscripts/3xui-smart-preset.user.js
+```
+
+安装后它会拦截 3x-ui 的“添加入站”请求，在提交前自动补全推荐参数：
+
+- `vless`：自动改成 `VLESS + TCP + REALITY + Vision + uTLS(chrome)`
+- `trojan`：自动改成 `Trojan + TCP + REALITY + uTLS(chrome)`
+- `hysteria`：补全基础 `TLS/QUIC` 预设
+- `shadowsocks`、`wireguard`、`mixed`、`http`、`tunnel`、`tun`：保留面板原配置，因为这些协议本身没有 REALITY 这类网页伪装参数
+
+注意：这个用户脚本是浏览器侧增强，不改 3x-ui 服务端二进制。它适合现有面板快速使用；如果要真正做进 3x-ui 源码，需要维护自定义 3x-ui 前端构建。
+
 `--preset-only` 不会重新安装 3x-ui，也不会重置面板账号。它会读取最近的 `/root/3x-ui-reality-install-*.txt` 结果文件里的面板连接信息，然后自动创建：
 
 - `VLESS + TCP + REALITY + Vision`
