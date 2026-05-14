@@ -456,11 +456,34 @@ generate_reality_keys() {
   xray_bin="$(find_xray_bin)"
   [[ -n "${xray_bin}" ]] || die "未在 ${XUI_DIR}/bin 下找到内置 xray 程序。"
 
-  keys="$("${xray_bin}" x25519)"
-  REALITY_PRIVATE_KEY="$(awk -F': ' 'tolower($1) ~ /private key/ {print $2; exit}' <<<"${keys}" | tr -d '[:space:]')"
-  REALITY_PUBLIC_KEY="$(awk -F': ' 'tolower($1) ~ /public key/ {print $2; exit}' <<<"${keys}" | tr -d '[:space:]')"
+  keys="$("${xray_bin}" x25519 2>&1)"
+  REALITY_PRIVATE_KEY="$(awk -F':' '
+    {
+      label=tolower($1)
+      gsub(/[[:space:]_-]/, "", label)
+      if (label == "privatekey") {
+        value=$2
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        print value
+        exit
+      }
+    }
+  ' <<<"${keys}")"
+  REALITY_PUBLIC_KEY="$(awk -F':' '
+    {
+      label=tolower($1)
+      gsub(/[[:space:]_-]/, "", label)
+      if (label == "publickey") {
+        value=$2
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        print value
+        exit
+      }
+    }
+  ' <<<"${keys}")"
 
-  [[ -n "${REALITY_PRIVATE_KEY}" && -n "${REALITY_PUBLIC_KEY}" ]] || die "生成 REALITY x25519 密钥失败。"
+  [[ -n "${REALITY_PRIVATE_KEY}" && -n "${REALITY_PUBLIC_KEY}" ]] || die "生成 REALITY x25519 密钥失败。xray 输出如下:
+${keys}"
 }
 
 gen_uuid() {
