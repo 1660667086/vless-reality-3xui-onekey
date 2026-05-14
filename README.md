@@ -42,6 +42,35 @@ sudo env USERS='alice:30:100:2,bob:7:0:0,charlie:90:300:3' \
 
 后续继续加用户、改到期时间、停用用户，直接进 3x-ui Web 面板的 `Inbounds -> Clients` 操作即可。
 
+## 推荐伪装预设
+
+不建议在面板里手动填 REALITY、Vision、uTLS、SNI、shortId 等参数，容易少填或填错。面板已安装后，可以直接用脚本创建推荐预设节点：
+
+```bash
+sudo env INBOUND_PORT=8443 USERS='newuser:30:100:2' \
+  bash install-vless-reality-3xui.sh --preset-only
+```
+
+`--preset-only` 不会重新安装 3x-ui，也不会重置面板账号。它会读取最近的 `/root/3x-ui-reality-install-*.txt` 结果文件里的面板连接信息，然后自动创建：
+
+- `VLESS + TCP + REALITY + Vision`
+- uTLS 指纹：`chrome`
+- REALITY SNI / 回落目标：默认 `www.microsoft.com`
+- 自动生成 X25519 key、short ID、用户 UUID
+
+如果结果文件不存在，可以手动传入面板信息：
+
+```bash
+sudo env \
+  PANEL_USER='你的面板用户名' \
+  PANEL_PASS='你的面板密码' \
+  PANEL_PORT=面板端口 \
+  PANEL_PATH='面板路径' \
+  INBOUND_PORT=8443 \
+  USERS='newuser:30:100:2' \
+  bash install-vless-reality-3xui.sh --preset-only
+```
+
 ## 常用参数
 
 ```bash

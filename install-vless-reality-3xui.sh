@@ -31,6 +31,7 @@ LIMIT_IP="${LIMIT_IP:-0}"
 USERS="${USERS:-}"
 
 AUTO_CREATE_INBOUND="${AUTO_CREATE_INBOUND:-1}"
+PRESET_ONLY="${PRESET_ONLY:-0}"
 ENABLE_BBR="${ENABLE_BBR:-1}"
 OPEN_FIREWALL="${OPEN_FIREWALL:-1}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
@@ -63,6 +64,7 @@ usage() {
   --target HOST:PORT      REALITY 回落目标。默认 SNI:443
   --users SPEC            用户列表: 用户名:到期天数:流量GB:IP限制,用户2:到期天数:流量GB:IP限制
                            到期天数=0 表示永不过期，流量GB=0 表示不限流量
+  --preset-only           不安装、不重置面板，只给现有 3x-ui 创建推荐预设节点
   --no-inbound            只安装面板，不自动创建节点
   --no-bbr                不开启 BBR sysctl
   --no-firewall           不自动放行 ufw/firewalld 端口
@@ -79,6 +81,7 @@ usage() {
   sudo env USERS='alice:30:100:2,bob:7:0:0' bash install-vless-reality-3xui.sh
   sudo env PANEL_PORT=25443 INBOUND_PORT=443 EXPIRE_DAYS=90 bash install-vless-reality-3xui.sh
   sudo env DISK_MIN_MB=512 TMPDIR=/root bash install-vless-reality-3xui.sh
+  sudo env INBOUND_PORT=8443 USERS='newuser:30:100:2' bash install-vless-reality-3xui.sh --preset-only
 EOF
 }
 
@@ -115,6 +118,7 @@ parse_args() {
       --sni) REALITY_SNI="$2"; shift 2 ;;
       --target) REALITY_TARGET="$2"; shift 2 ;;
       --users) USERS="$2"; shift 2 ;;
+      --preset-only) PRESET_ONLY=1; shift ;;
       --no-inbound) AUTO_CREATE_INBOUND=0; shift ;;
       --no-bbr) ENABLE_BBR=0; shift ;;
       --no-firewall) OPEN_FIREWALL=0; shift ;;
@@ -136,6 +140,16 @@ require_root() {
 
 require_systemd() {
   command -v systemctl >/dev/null 2>&1 || die "当前脚本需要运行在 systemd Linux VPS 上。"
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1。请先安装后重试。"
+}
+
+require_basic_tools() {
+  require_cmd curl
+  require_cmd jq
+  require_cmd openssl
 }
 
 available_mb() {
@@ -325,13 +339,23 @@ install_packages() {
 }
 
 set_defaults() {
-  [[ -n "${PANEL_USER}" ]] || PANEL_USER="admin_$(random_alnum 6)"
-  [[ -n "${PANEL_PASS}" ]] || PANEL_PASS="$(random_alnum 18)"
-  [[ -n "${PANEL_PORT}" ]] || PANEL_PORT="$(random_port)"
-  [[ -n "${PANEL_PATH}" ]] || PANEL_PATH="$(random_alnum 18)"
+  if [[ "${PRESET_ONLY}" == "1" ]]; then
+    load_panel_result
+    [[ -n "${PANEL_USER}" ]] || die "缺少 PANEL_USER。可通过环境变量传入，或保留 /root/3x-ui-reality-install-*.txt 结果文件供脚本读取。"
+    [[ -n "${PANEL_PASS}" ]] || die "缺少 PANEL_PASS。可通过环境变量传入，或保留 /root/3x-ui-reality-install-*.txt 结果文件供脚本读取。"
+    [[ -n "${PANEL_PORT}" ]] || die "缺少 PANEL_PORT。可通过环境变量传入，或保留 /root/3x-ui-reality-install-*.txt 结果文件供脚本读取。"
+    [[ -n "${PANEL_PATH}" ]] || die "缺少 PANEL_PATH。可通过环境变量传入，或保留 /root/3x-ui-reality-install-*.txt 结果文件供脚本读取。"
+  else
+    [[ -n "${PANEL_USER}" ]] || PANEL_USER="admin_$(random_alnum 6)"
+    [[ -n "${PANEL_PASS}" ]] || PANEL_PASS="$(random_alnum 18)"
+    [[ -n "${PANEL_PORT}" ]] || PANEL_PORT="$(random_port)"
+    [[ -n "${PANEL_PATH}" ]] || PANEL_PATH="$(random_alnum 18)"
+  fi
   PANEL_PATH="${PANEL_PATH#/}"
   PANEL_PATH="${PANEL_PATH%/}"
-  [[ -n "${PANEL_PATH}" ]] || PANEL_PATH="$(random_alnum 18)"
+  if [[ "${PRESET_ONLY}" != "1" ]]; then
+    [[ -n "${PANEL_PATH}" ]] || PANEL_PATH="$(random_alnum 18)"
+  fi
 
   valid_port "${PANEL_PORT}" || die "面板端口无效 PANEL_PORT: ${PANEL_PORT}"
   valid_port "${INBOUND_PORT}" || die "节点端口无效 INBOUND_PORT: ${INBOUND_PORT}"
@@ -340,6 +364,21 @@ set_defaults() {
   if [[ -z "${USERS}" ]]; then
     USERS="${FIRST_USER}:${EXPIRE_DAYS}:${TOTAL_GB}:${LIMIT_IP}"
   fi
+}
+
+load_panel_result() {
+  local latest url
+  latest="$(ls -t /root/3x-ui-reality-install-*.txt 2>/dev/null | head -n 1 || true)"
+  [[ -n "${latest}" && -f "${latest}" ]] || return
+
+  [[ -n "${PANEL_USER}" ]] || PANEL_USER="$(awk -F': ' '/^面板用户名:/ {print $2; exit}' "${latest}")"
+  [[ -n "${PANEL_PASS}" ]] || PANEL_PASS="$(awk -F': ' '/^面板密码:/ {print $2; exit}' "${latest}")"
+  url="$(awk -F': ' '/^面板本地地址:/ {print $2; exit}' "${latest}")"
+  if [[ -n "${url}" ]]; then
+    [[ -n "${PANEL_PORT}" ]] || PANEL_PORT="$(sed -n 's#^http://127\.0\.0\.1:\([0-9]\+\)/.*#\1#p' <<<"${url}")"
+    [[ -n "${PANEL_PATH}" ]] || PANEL_PATH="$(sed -n 's#^http://127\.0\.0\.1:[0-9]\+/\(.*\)/$#\1#p' <<<"${url}")"
+  fi
+  log "已尝试从 ${latest} 读取面板连接信息"
 }
 
 public_addr() {
@@ -724,6 +763,15 @@ main() {
   require_systemd
   preflight_disk_space
   ensure_auto_swap
+
+  if [[ "${PRESET_ONLY}" == "1" ]]; then
+    require_basic_tools
+    set_defaults
+    open_firewall
+    create_inbound
+    return
+  fi
+
   install_packages
   set_defaults
   install_3xui
