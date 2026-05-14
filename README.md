@@ -63,8 +63,13 @@ userscripts/3xui-smart-preset.user.js
 
 - `vless`：自动改成 `VLESS + TCP + REALITY + Vision + uTLS(chrome)`
 - `trojan`：自动改成 `Trojan + TCP + REALITY + uTLS(chrome)`
-- `hysteria`：补全基础 `TLS/QUIC` 预设
-- `shadowsocks`、`wireguard`、`mixed`、`http`、`tunnel`、`tun`：保留面板原配置，因为这些协议本身没有 REALITY 这类网页伪装参数
+- `hysteria`：自动补全 `Hysteria2 + TLS(h3) + Masquerade`；如果面板没有默认证书，脚本会提示先配置证书
+- `shadowsocks`：自动补全 `Shadowsocks 2022 + TCP/UDP + ivCheck`
+- `wireguard`：自动生成服务端和客户端密钥，设置 MTU 和 keepalive
+- `mixed`：自动补全 HTTP/SOCKS 账号密码，并开启 UDP
+- `http`：自动补全 HTTP 代理账号密码
+- `tunnel`：自动补全可创建的默认转发参数，默认目标 `127.0.0.1:80`
+- `tun`：自动补全 `xray0`、MTU、网关和 DNS
 
 注意：这个用户脚本是浏览器侧增强，不改 3x-ui 服务端二进制。它适合现有面板快速使用；如果要真正做进 3x-ui 源码，需要维护自定义 3x-ui 前端构建。
 
