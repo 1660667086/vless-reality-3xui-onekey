@@ -36,6 +36,10 @@ OPEN_FIREWALL="${OPEN_FIREWALL:-1}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
 ALLOW_USED_INBOUND_PORT="${ALLOW_USED_INBOUND_PORT:-0}"
 DISK_MIN_MB="${DISK_MIN_MB:-1024}"
+AUTO_SWAP="${AUTO_SWAP:-1}"
+SWAP_SIZE_MB="${SWAP_SIZE_MB:-1024}"
+SWAP_THRESHOLD_MB="${SWAP_THRESHOLD_MB:-1024}"
+SWAP_FILE="${SWAP_FILE:-/swapfile}"
 INSTALL_TMP=""
 
 red='\033[0;31m'
@@ -64,6 +68,10 @@ usage() {
   --no-firewall           不自动放行 ufw/firewalld 端口
   --force-reinstall       替换已有的 /usr/local/x-ui
   --disk-min-mb MB        安装前要求的最小可用空间。默认 1024 MB
+  --no-swap               不自动创建 swap
+  --swap-size-mb MB       自动创建 swap 的大小。默认 1024 MB
+  --swap-threshold-mb MB  内存低于该值且无 swap 时自动创建。默认 1024 MB
+  --swap-file PATH        swap 文件路径。默认 /swapfile
   -h, --help              显示帮助
 
 示例:
@@ -112,6 +120,10 @@ parse_args() {
       --no-firewall) OPEN_FIREWALL=0; shift ;;
       --force-reinstall) FORCE_REINSTALL=1; shift ;;
       --disk-min-mb) DISK_MIN_MB="$2"; shift 2 ;;
+      --no-swap) AUTO_SWAP=0; shift ;;
+      --swap-size-mb) SWAP_SIZE_MB="$2"; shift 2 ;;
+      --swap-threshold-mb) SWAP_THRESHOLD_MB="$2"; shift 2 ;;
+      --swap-file) SWAP_FILE="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数: $1" ;;
     esac
@@ -161,6 +173,66 @@ preflight_disk_space() {
   if [[ -d /usr/local ]]; then
     require_space "/usr/local" "${DISK_MIN_MB}" "/usr/local"
   fi
+}
+
+mem_total_mb() {
+  awk '/MemTotal:/ {printf "%d", ($2 + 1023) / 1024}' /proc/meminfo
+}
+
+swap_total_mb() {
+  awk '/SwapTotal:/ {printf "%d", $2 / 1024}' /proc/meminfo
+}
+
+ensure_auto_swap() {
+  [[ "${AUTO_SWAP}" == "1" ]] || return
+  [[ "${SWAP_SIZE_MB}" =~ ^[0-9]+$ && "${SWAP_SIZE_MB}" -gt 0 ]] || die "SWAP_SIZE_MB 必须是大于 0 的数字，当前值: ${SWAP_SIZE_MB}"
+  [[ "${SWAP_THRESHOLD_MB}" =~ ^[0-9]+$ ]] || die "SWAP_THRESHOLD_MB 必须是数字，当前值: ${SWAP_THRESHOLD_MB}"
+  [[ "${SWAP_FILE}" = /* ]] || die "SWAP_FILE 必须是绝对路径，当前值: ${SWAP_FILE}"
+
+  local mem_mb swap_mb swap_dir required_mb
+  mem_mb="$(mem_total_mb)"
+  swap_mb="$(swap_total_mb)"
+
+  if (( swap_mb > 0 )); then
+    log "检测到已有 swap: ${swap_mb} MB，跳过自动创建。"
+    return
+  fi
+
+  if (( mem_mb >= SWAP_THRESHOLD_MB )); then
+    log "当前内存 ${mem_mb} MB，未低于自动创建 swap 阈值 ${SWAP_THRESHOLD_MB} MB，跳过。"
+    return
+  fi
+
+  if [[ -e "${SWAP_FILE}" ]]; then
+    warn "检测到 ${SWAP_FILE} 已存在但系统未启用 swap。为避免覆盖已有文件，跳过自动创建。"
+    return
+  fi
+
+  command -v mkswap >/dev/null 2>&1 || die "未找到 mkswap，无法自动创建 swap。"
+  command -v swapon >/dev/null 2>&1 || die "未找到 swapon，无法自动启用 swap。"
+
+  swap_dir="$(dirname "${SWAP_FILE}")"
+  [[ -d "${swap_dir}" ]] || die "swap 目录不存在: ${swap_dir}"
+  required_mb=$((SWAP_SIZE_MB + DISK_MIN_MB))
+  require_space "${swap_dir}" "${required_mb}" "swap 文件所在分区"
+
+  log "检测到内存 ${mem_mb} MB 且没有 swap，正在创建 ${SWAP_SIZE_MB} MB swap: ${SWAP_FILE}"
+  if ! fallocate -l "${SWAP_SIZE_MB}M" "${SWAP_FILE}" 2>/dev/null; then
+    dd if=/dev/zero of="${SWAP_FILE}" bs=1M count="${SWAP_SIZE_MB}" status=progress
+  fi
+  chmod 600 "${SWAP_FILE}"
+  if ! mkswap "${SWAP_FILE}" >/dev/null; then
+    rm -f "${SWAP_FILE}"
+    die "格式化 swap 文件失败。"
+  fi
+  if ! swapon "${SWAP_FILE}"; then
+    rm -f "${SWAP_FILE}"
+    die "启用 swap 文件失败。"
+  fi
+  if ! awk -v f="${SWAP_FILE}" '$1 == f {found=1} END {exit !found}' /etc/fstab; then
+    echo "${SWAP_FILE} none swap sw 0 0" >> /etc/fstab
+  fi
+  log "swap 已启用: $(swap_total_mb) MB"
 }
 
 valid_port() {
@@ -603,6 +675,7 @@ main() {
   require_root
   require_systemd
   preflight_disk_space
+  ensure_auto_swap
   install_packages
   set_defaults
   install_3xui

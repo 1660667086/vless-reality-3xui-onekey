@@ -63,6 +63,16 @@ sudo env \
 sudo env TMPDIR=/root DISK_MIN_MB=512 bash install-vless-reality-3xui.sh
 ```
 
+小内存机器会自动识别 swap：默认在内存低于 1GB 且没有 swap 时创建 1GB `/swapfile`，启用后写入 `/etc/fstab`。
+
+```bash
+# 不自动创建 swap
+sudo bash install-vless-reality-3xui.sh --no-swap
+
+# 改成自动创建 2GB swap
+sudo bash install-vless-reality-3xui.sh --swap-size-mb 2048
+```
+
 也可以用命令参数：
 
 ```bash
