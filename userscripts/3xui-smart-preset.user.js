@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.3.5
+// @version      0.3.6
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
@@ -718,29 +718,34 @@
       && String(url).includes('/panel/api/inbounds/add');
   }
 
-  function appendPinToHysteriaUrl(raw, pinSha256) {
-    if (!pinSha256 || !/^hy(?:steria)?2?:\/\//i.test(raw)) return raw;
+  function appendSecurityToHysteriaUrl(raw, pinSha256) {
+    if (!/^hy(?:steria)?2?:\/\//i.test(raw)) return raw;
     try {
       const url = new URL(raw);
-      if (/^hy(?:steria)?2?:$/i.test(url.protocol) && !url.searchParams.has('pinSHA256')) {
+      if (!/^hy(?:steria)?2?:$/i.test(url.protocol)) return raw;
+      if (!url.searchParams.has('insecure')) {
+        url.searchParams.set('insecure', '1');
+      }
+      if (pinSha256 && !url.searchParams.has('pinSHA256')) {
         url.searchParams.set('pinSHA256', pinSha256);
       }
-      if (/^hy(?:steria)?2?:$/i.test(url.protocol) && !url.searchParams.has('fingerprint')) {
+      if (pinSha256 && !url.searchParams.has('fingerprint')) {
         url.searchParams.set('fingerprint', pinSha256);
       }
       return (nativeUrlToString || URL.prototype.toString).call(url);
     } catch (_e) {
       const parts = [];
-      if (!raw.includes('pinSHA256=')) parts.push(`pinSHA256=${encodeURIComponent(pinSha256)}`);
-      if (!raw.includes('fingerprint=')) parts.push(`fingerprint=${encodeURIComponent(pinSha256)}`);
+      if (!raw.includes('insecure=')) parts.push('insecure=1');
+      if (pinSha256 && !raw.includes('pinSHA256=')) parts.push(`pinSHA256=${encodeURIComponent(pinSha256)}`);
+      if (pinSha256 && !raw.includes('fingerprint=')) parts.push(`fingerprint=${encodeURIComponent(pinSha256)}`);
       if (parts.length === 0) return raw;
       const separator = raw.includes('?') ? '&' : '?';
       return `${raw}${separator}${parts.join('&')}`;
     }
   }
 
-  function appendPinToHysteriaUrls(text, pinSha256) {
-    return text.replace(/\b(?:hy2|hysteria2?):\/\/[^\s"'<>]+/gi, (url) => appendPinToHysteriaUrl(url, pinSha256));
+  function appendSecurityToHysteriaUrls(text, pinSha256) {
+    return text.replace(/\b(?:hy2|hysteria2?):\/\/[^\s"'<>]+/gi, (url) => appendSecurityToHysteriaUrl(url, pinSha256));
   }
 
   function addMihomoHysteriaFingerprint(text, pinSha256) {
@@ -759,12 +764,14 @@
     return out.join('\n');
   }
 
-  function withHysteriaPinSha256(text) {
+  function withHysteriaSecurityParams(text) {
     const pinSha256 = getHysteriaPinSha256();
-    if (!pinSha256 || typeof text !== 'string') return text;
-    const updated = addMihomoHysteriaFingerprint(appendPinToHysteriaUrls(text, pinSha256), pinSha256);
+    if (typeof text !== 'string') return text;
+    const updated = addMihomoHysteriaFingerprint(appendSecurityToHysteriaUrls(text, pinSha256), pinSha256);
     if (updated !== text) {
-      toast('已为 Hysteria2 链接补上 pinSHA256 / SHA256 fingerprint');
+      toast(pinSha256
+        ? '已为 Hysteria2 链接补上 insecure=1 / pinSHA256'
+        : '已为 Hysteria2 链接补上 insecure=1；如需证书绑定请先设置 SHA256');
     }
     return updated;
   }
@@ -772,7 +779,7 @@
   function patchClipboardPinSha256() {
     if (!navigator.clipboard?.writeText) return;
     const rawWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
-    navigator.clipboard.writeText = (text) => rawWriteText(withHysteriaPinSha256(text));
+    navigator.clipboard.writeText = (text) => rawWriteText(withHysteriaSecurityParams(text));
   }
 
   function patchHysteriaUrlToString() {
@@ -780,16 +787,21 @@
     nativeUrlToString = URL.prototype.toString;
     URL.prototype.toString = function () {
       const raw = nativeUrlToString.call(this);
-      return appendPinToHysteriaUrl(raw, getHysteriaPinSha256());
+      return appendSecurityToHysteriaUrl(raw, getHysteriaPinSha256());
     };
     URL.prototype.toJSON = function () {
       const raw = nativeUrlToString.call(this);
-      return appendPinToHysteriaUrl(raw, getHysteriaPinSha256());
+      return appendSecurityToHysteriaUrl(raw, getHysteriaPinSha256());
     };
   }
 
   function updatePinControlLabel(button) {
-    button.textContent = getHysteriaPinSha256() ? 'HY2 SHA256 已设' : 'HY2 SHA256';
+    const configured = Boolean(getHysteriaPinSha256());
+    button.textContent = configured ? 'HY2 SHA256 已设' : 'HY2 SHA256 未设';
+    button.style.background = configured ? '#1677ff' : '#d46b08';
+    button.title = configured
+      ? 'Hysteria2 二维码会带 pinSHA256'
+      : '未设置 SHA256 时二维码只会带 insecure=1';
   }
 
   function installPinControl() {
@@ -805,7 +817,7 @@
       'padding:8px 10px',
       'border:0',
       'border-radius:8px',
-      'background:#1677ff',
+      'background:#d46b08',
       'color:#fff',
       'font-size:12px',
       'font-weight:700',
@@ -822,7 +834,9 @@
       if (input === null) return;
       const saved = setHysteriaPinSha256(input);
       updatePinControlLabel(button);
-      toast(saved ? '已保存 Hysteria2 SHA256 指纹，刷新面板后二维码会带 pinSHA256' : '已清除 Hysteria2 SHA256 指纹');
+      toast(saved
+        ? '已保存 Hysteria2 SHA256 指纹，关闭重开二维码后会带 pinSHA256'
+        : '已清除 Hysteria2 SHA256 指纹，二维码仍会带 insecure=1');
     });
     document.body.appendChild(button);
   }
