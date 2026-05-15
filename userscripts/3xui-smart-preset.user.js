@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.3.2
+// @version      0.3.3
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
@@ -24,6 +24,7 @@
   ];
 
   const SS_METHOD = '2022-blake3-aes-256-gcm';
+  const HYSTERIA_FALLBACK_SNI = 'www.bing.com';
 
   class Wireguard {
     static gf(init) {
@@ -208,6 +209,10 @@
     return Array.from(values, (v) => chars[v % chars.length]).join('');
   }
 
+  function randomSafeSecret(count = 32) {
+    return randomSeq(count, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  }
+
   function randomBase64Bytes(length) {
     const buf = new Uint8Array(length);
     crypto.getRandomValues(buf);
@@ -349,6 +354,10 @@
     const settings = tlsSettingsPreset(['h3'], cert);
     settings.minVersion = '1.3';
     settings.maxVersion = '1.3';
+    if (!hasDefaultCert(cert)) {
+      settings.serverName = HYSTERIA_FALLBACK_SNI;
+      settings.settings.allowInsecure = true;
+    }
     return settings;
   }
 
@@ -480,7 +489,7 @@
       udp: [{
         type: 'salamander',
         settings: {
-          password: randomBase64Bytes(32),
+          password: randomSafeSecret(32),
         },
       }],
       quicParams: {
@@ -501,7 +510,7 @@
     params.set('sniffing', JSON.stringify(sniffingPreset()));
     return hasDefaultCert(cert)
       ? '已套用 Hysteria2 + TLS1.3/h3 + 404伪装 + Salamander + BBR 安全预设'
-      : '已套用 Hysteria2 + 404伪装 + Salamander + BBR；未检测到默认 TLS 证书，已跳过证书绑定';
+      : `已套用 Hysteria2 + SNI(${HYSTERIA_FALLBACK_SNI}) + skip-cert-verify + Salamander 安全兼容预设`;
   }
 
   function applyShadowsocksPreset(params) {
