@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.3.4
+// @version      0.3.5
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
@@ -26,6 +26,7 @@
   const SS_METHOD = '2022-blake3-aes-256-gcm';
   const HYSTERIA_FALLBACK_SNI = 'www.bing.com';
   const HYSTERIA_PIN_SHA256_KEY = 'xui_hysteria_pin_sha256';
+  let nativeUrlToString = null;
 
   class Wireguard {
     static gf(init) {
@@ -233,6 +234,20 @@
     } catch (_e) {
       return '';
     }
+  }
+
+  function setHysteriaPinSha256(value) {
+    const pinSha256 = normalizeSha256Fingerprint(value);
+    try {
+      if (pinSha256) {
+        localStorage.setItem(HYSTERIA_PIN_SHA256_KEY, pinSha256);
+      } else {
+        localStorage.removeItem(HYSTERIA_PIN_SHA256_KEY);
+      }
+    } catch (_e) {
+      return '';
+    }
+    return pinSha256;
   }
 
   function randomBase64Bytes(length) {
@@ -710,10 +725,17 @@
       if (/^hy(?:steria)?2?:$/i.test(url.protocol) && !url.searchParams.has('pinSHA256')) {
         url.searchParams.set('pinSHA256', pinSha256);
       }
-      return url.toString();
+      if (/^hy(?:steria)?2?:$/i.test(url.protocol) && !url.searchParams.has('fingerprint')) {
+        url.searchParams.set('fingerprint', pinSha256);
+      }
+      return (nativeUrlToString || URL.prototype.toString).call(url);
     } catch (_e) {
+      const parts = [];
+      if (!raw.includes('pinSHA256=')) parts.push(`pinSHA256=${encodeURIComponent(pinSha256)}`);
+      if (!raw.includes('fingerprint=')) parts.push(`fingerprint=${encodeURIComponent(pinSha256)}`);
+      if (parts.length === 0) return raw;
       const separator = raw.includes('?') ? '&' : '?';
-      return raw.includes('pinSHA256=') ? raw : `${raw}${separator}pinSHA256=${encodeURIComponent(pinSha256)}`;
+      return `${raw}${separator}${parts.join('&')}`;
     }
   }
 
@@ -753,6 +775,68 @@
     navigator.clipboard.writeText = (text) => rawWriteText(withHysteriaPinSha256(text));
   }
 
+  function patchHysteriaUrlToString() {
+    if (nativeUrlToString || typeof URL !== 'function') return;
+    nativeUrlToString = URL.prototype.toString;
+    URL.prototype.toString = function () {
+      const raw = nativeUrlToString.call(this);
+      return appendPinToHysteriaUrl(raw, getHysteriaPinSha256());
+    };
+    URL.prototype.toJSON = function () {
+      const raw = nativeUrlToString.call(this);
+      return appendPinToHysteriaUrl(raw, getHysteriaPinSha256());
+    };
+  }
+
+  function updatePinControlLabel(button) {
+    button.textContent = getHysteriaPinSha256() ? 'HY2 SHA256 已设' : 'HY2 SHA256';
+  }
+
+  function installPinControl() {
+    if (!document.body || document.getElementById('xui-hysteria-pin-control')) return;
+    const button = document.createElement('button');
+    button.id = 'xui-hysteria-pin-control';
+    button.type = 'button';
+    button.style.cssText = [
+      'position:fixed',
+      'right:18px',
+      'bottom:18px',
+      'z-index:2147483647',
+      'padding:8px 10px',
+      'border:0',
+      'border-radius:8px',
+      'background:#1677ff',
+      'color:#fff',
+      'font-size:12px',
+      'font-weight:700',
+      'box-shadow:0 8px 24px rgba(0,0,0,.22)',
+      'cursor:pointer',
+    ].join(';');
+    updatePinControlLabel(button);
+    button.addEventListener('click', () => {
+      const current = getHysteriaPinSha256();
+      const input = window.prompt(
+        '请输入 Hysteria2 证书 SHA256 指纹。留空并确定可清除。示例: AA:BB:... 或 64位十六进制',
+        current
+      );
+      if (input === null) return;
+      const saved = setHysteriaPinSha256(input);
+      updatePinControlLabel(button);
+      toast(saved ? '已保存 Hysteria2 SHA256 指纹，刷新面板后二维码会带 pinSHA256' : '已清除 Hysteria2 SHA256 指纹');
+    });
+    document.body.appendChild(button);
+  }
+
+  function schedulePinControl() {
+    const run = () => installPinControl();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', run, { once: true });
+    } else {
+      run();
+    }
+    setTimeout(run, 1500);
+  }
+
   const rawOpen = XMLHttpRequest.prototype.open;
   const rawSend = XMLHttpRequest.prototype.send;
 
@@ -790,5 +874,7 @@
     };
   }
 
+  patchHysteriaUrlToString();
   patchClipboardPinSha256();
+  schedulePinControl();
 })();
