@@ -117,7 +117,7 @@ openssl x509 -noout -fingerprint -sha256 -in /path/to/fullchain.pem
 localStorage.setItem('xui_hysteria_pin_sha256', 'AA:BB:CC:...:FF')
 ```
 
-以后创建 Hysteria2 入站会把这个值写入 TLS 设置；面板二维码和复制 `hysteria2://` 链接时会自动追加 `insecure=1` / `pinSHA256` / `fingerprint`，复制 mihomo/Clash YAML 时会自动追加 `fingerprint`。如果要取消：
+以后创建 Hysteria2 入站会把这个值写入 TLS 设置；面板二维码和复制 `hysteria2://` 链接时会自动追加 `insecure=1` / `pinSHA256` / `fingerprint`，复制 mihomo/Clash YAML 时会自动追加 `fingerprint`。二维码弹窗会自动切到具体客户端二维码，避免误扫默认的「订阅信息」二维码。如果要取消：
 
 ```js
 localStorage.removeItem('xui_hysteria_pin_sha256')

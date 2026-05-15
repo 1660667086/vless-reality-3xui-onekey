@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.3.6
+// @version      0.3.7
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
@@ -851,6 +851,64 @@
     setTimeout(run, 1500);
   }
 
+  function getQrModal() {
+    return Array.from(document.querySelectorAll('.ant-modal-content, [role="dialog"]'))
+      .find((el) => /二维码|QR Code/i.test(el.textContent || ''));
+  }
+
+  function isCollapseButtonActive(button) {
+    const item = button.closest('.ant-collapse-item');
+    return button.getAttribute('aria-expanded') === 'true'
+      || item?.classList.contains('ant-collapse-item-active');
+  }
+
+  function getQrPanelButtons(modal) {
+    return Array.from(modal.querySelectorAll('button')).filter((button) => {
+      const text = (button.textContent || '').trim();
+      return text && !/^(copy|close)$/i.test(text);
+    });
+  }
+
+  function preferClientQrPanel() {
+    const modal = getQrModal();
+    if (!modal) return;
+    const buttons = getQrPanelButtons(modal);
+    const clientButton = buttons.find((button) => {
+      const text = (button.textContent || '').trim();
+      return text && !/订阅信息|subscription/i.test(text);
+    });
+    if (!clientButton) return;
+    const subButton = buttons.find((button) => /订阅信息|subscription/i.test(button.textContent || ''));
+    if (!isCollapseButtonActive(clientButton)) {
+      clientButton.click();
+    }
+    if (subButton && isCollapseButtonActive(subButton)) {
+      subButton.click();
+    }
+  }
+
+  function scheduleQrPanelPreference() {
+    let timer = 0;
+    const run = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(preferClientQrPanel, 120);
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', run, { once: true });
+    } else {
+      run();
+    }
+    const observer = new MutationObserver(run);
+    const startObserver = () => {
+      if (document.body) observer.observe(document.body, { childList: true, subtree: true });
+    };
+    if (document.body) {
+      startObserver();
+    } else {
+      document.addEventListener('DOMContentLoaded', startObserver, { once: true });
+    }
+  }
+
   const rawOpen = XMLHttpRequest.prototype.open;
   const rawSend = XMLHttpRequest.prototype.send;
 
@@ -891,4 +949,5 @@
   patchHysteriaUrlToString();
   patchClipboardPinSha256();
   schedulePinControl();
+  scheduleQrPanelPreference();
 })();
