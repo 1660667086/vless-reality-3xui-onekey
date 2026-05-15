@@ -95,7 +95,7 @@ userscripts/3xui-smart-preset.user.js
 
 - `vless`：自动改成 `VLESS + TCP + REALITY + Vision + uTLS(chrome)`
 - `trojan`：自动改成 `Trojan + TCP + REALITY + uTLS(chrome)`
-- `hysteria`：安全预设为 `Hysteria2 + TLS(h3) + Masquerade + 强随机认证`；没有面板默认 TLS 证书时会自动跳过证书绑定，不阻止创建
+- `hysteria`：安全预设为 `Hysteria2 + TLS1.3/h3 + 404 伪装页 + Salamander 混淆 + BBR QUIC 参数`；没有面板默认 TLS 证书时会自动跳过证书绑定，不阻止创建
 - `shadowsocks`：有默认 TLS 证书时使用 `Shadowsocks 2022 + TCP-only + TLS + ivCheck`；没有证书时自动降级为 `Shadowsocks 2022 + TCP-only + ivCheck`
 - `wireguard`：自动生成服务端和客户端密钥，设置 MTU `1280`、keepalive `25` 和独立内网地址
 - `mixed`：默认只监听 `127.0.0.1`，强账号密码，关闭 UDP，避免公网裸露

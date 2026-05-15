@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.3.1
+// @version      0.3.2
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
@@ -214,6 +214,14 @@
     return btoa(String.fromCharCode(...buf));
   }
 
+  function randomUuid() {
+    if (typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    const hex = randomHex(16);
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${((parseInt(hex.slice(16, 18), 16) & 0x3f) | 0x80).toString(16)}${hex.slice(18, 20)}-${hex.slice(20)}`;
+  }
+
   function randomSSPassword(method = SS_METHOD) {
     return randomBase64Bytes(method === '2022-blake3-aes-128-gcm' ? 16 : 32);
   }
@@ -337,6 +345,13 @@
     return settings;
   }
 
+  function hysteriaTlsSettingsPreset(cert) {
+    const settings = tlsSettingsPreset(['h3'], cert);
+    settings.minVersion = '1.3';
+    settings.maxVersion = '1.3';
+    return settings;
+  }
+
   function tlsTcpStreamPreset(cert) {
     return {
       network: 'tcp',
@@ -430,36 +445,63 @@
   function applyHysteriaPreset(params) {
     const settings = parseJson(params.get('settings'), {});
     const stream = parseJson(params.get('streamSettings'), {});
-    const picked = pickRealityTarget();
     const cert = getDefaultCertSettingsSync();
     settings.version = 2;
-    ensureClients(settings, (client) => ({ auth: client.auth || randomSeq(24) }));
+    ensureClients(settings, (client) => ({
+      auth: typeof client.auth === 'string' && client.auth.length >= 24 ? client.auth : randomUuid(),
+    }));
+    const primaryAuth = settings.clients?.[0]?.auth || randomUuid();
     stream.network = 'hysteria';
     stream.security = 'tls';
     stream.externalProxy = [];
-    stream.tlsSettings = tlsSettingsPreset(['h3'], cert);
+    stream.tlsSettings = hysteriaTlsSettingsPreset(cert);
     stream.hysteriaSettings = {
       protocol: 'udp',
       version: 2,
-      auth: randomBase64Bytes(32),
-      udpIdleTimeout: 60,
+      auth: primaryAuth,
+      udpIdleTimeout: 30,
       masquerade: {
-        type: 'proxy',
+        type: 'string',
         dir: '',
-        url: `https://${picked.sni}`,
-        rewriteHost: true,
+        url: '',
+        rewriteHost: false,
         insecure: false,
-        content: '',
-        headers: {},
-        statusCode: 0,
+        content: '<!doctype html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>',
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+        },
+        statusCode: 404,
+      },
+    };
+    stream.finalmask = {
+      tcp: [],
+      udp: [{
+        type: 'salamander',
+        settings: {
+          password: randomBase64Bytes(32),
+        },
+      }],
+      quicParams: {
+        congestion: 'bbr',
+        debug: false,
+        initStreamReceiveWindow: 8388608,
+        maxStreamReceiveWindow: 8388608,
+        initConnectionReceiveWindow: 20971520,
+        maxConnectionReceiveWindow: 20971520,
+        maxIdleTimeout: 30,
+        keepAlivePeriod: 10,
+        disablePathMTUDiscovery: false,
+        maxIncomingStreams: 1024,
       },
     };
     params.set('settings', JSON.stringify(settings));
     params.set('streamSettings', JSON.stringify(stream));
     params.set('sniffing', JSON.stringify(sniffingPreset()));
     return hasDefaultCert(cert)
-      ? '已套用 Hysteria2 + TLS(h3) + Masquerade + 强随机认证安全预设'
-      : '已套用 Hysteria2 安全预设；未检测到默认 TLS 证书，已自动跳过证书绑定';
+      ? '已套用 Hysteria2 + TLS1.3/h3 + 404伪装 + Salamander + BBR 安全预设'
+      : '已套用 Hysteria2 + 404伪装 + Salamander + BBR；未检测到默认 TLS 证书，已跳过证书绑定';
   }
 
   function applyShadowsocksPreset(params) {
