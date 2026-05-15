@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.3.0
+// @version      0.3.1
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
@@ -265,12 +265,8 @@
     return { certFile: '', keyFile: '' };
   }
 
-  function requireDefaultCert(protocol) {
-    const cert = getDefaultCertSettingsSync();
-    if (!cert.certFile || !cert.keyFile) {
-      throw new Error(`${protocol} 安全预设需要先在 3x-ui 面板设置默认 TLS 证书`);
-    }
-    return cert;
+  function hasDefaultCert(cert) {
+    return Boolean(cert?.certFile && cert?.keyFile);
   }
 
   function sniffingPreset(enabled = true) {
@@ -313,7 +309,7 @@
   }
 
   function tlsSettingsPreset(alpn = ['h3'], cert = getDefaultCertSettingsSync()) {
-    return {
+    const settings = {
       serverName: '',
       minVersion: '1.2',
       maxVersion: '1.3',
@@ -321,13 +317,7 @@
       rejectUnknownSni: false,
       disableSystemRoot: false,
       enableSessionResumption: false,
-      certificates: [{
-        certificateFile: cert.certFile,
-        keyFile: cert.keyFile,
-        oneTimeLoading: false,
-        usage: 'encipherment',
-        buildChain: false,
-      }],
+      certificates: [],
       alpn,
       echServerKeys: '',
       settings: {
@@ -335,6 +325,16 @@
         echConfigList: '',
       },
     };
+    if (hasDefaultCert(cert)) {
+      settings.certificates = [{
+        certificateFile: cert.certFile,
+        keyFile: cert.keyFile,
+        oneTimeLoading: false,
+        usage: 'encipherment',
+        buildChain: false,
+      }];
+    }
+    return settings;
   }
 
   function tlsTcpStreamPreset(cert) {
@@ -431,7 +431,7 @@
     const settings = parseJson(params.get('settings'), {});
     const stream = parseJson(params.get('streamSettings'), {});
     const picked = pickRealityTarget();
-    const cert = requireDefaultCert('Hysteria2');
+    const cert = getDefaultCertSettingsSync();
     settings.version = 2;
     ensureClients(settings, (client) => ({ auth: client.auth || randomSeq(24) }));
     stream.network = 'hysteria';
@@ -457,12 +457,14 @@
     params.set('settings', JSON.stringify(settings));
     params.set('streamSettings', JSON.stringify(stream));
     params.set('sniffing', JSON.stringify(sniffingPreset()));
-    return '已套用 Hysteria2 + TLS(h3) + Masquerade + 强随机认证安全预设';
+    return hasDefaultCert(cert)
+      ? '已套用 Hysteria2 + TLS(h3) + Masquerade + 强随机认证安全预设'
+      : '已套用 Hysteria2 安全预设；未检测到默认 TLS 证书，已自动跳过证书绑定';
   }
 
   function applyShadowsocksPreset(params) {
     const settings = parseJson(params.get('settings'), {});
-    const cert = requireDefaultCert('Shadowsocks');
+    const cert = getDefaultCertSettingsSync();
     settings.method = SS_METHOD;
     settings.password = randomSSPassword(SS_METHOD);
     settings.network = 'tcp';
@@ -472,9 +474,13 @@
       password: client.password && client.password.length > 20 ? client.password : randomSSPassword(SS_METHOD),
     }));
     params.set('settings', JSON.stringify(settings));
-    params.set('streamSettings', JSON.stringify(tlsTcpStreamPreset(cert)));
+    params.set('streamSettings', JSON.stringify(
+      hasDefaultCert(cert) ? tlsTcpStreamPreset(cert) : plainTcpStreamPreset()
+    ));
     params.set('sniffing', JSON.stringify(sniffingPreset()));
-    return '已套用 Shadowsocks 2022 + TCP-only + TLS + ivCheck 安全预设';
+    return hasDefaultCert(cert)
+      ? '已套用 Shadowsocks 2022 + TCP-only + TLS + ivCheck 安全预设'
+      : '已套用 Shadowsocks 2022 + TCP-only + ivCheck；未检测到默认 TLS 证书，已自动跳过 TLS';
   }
 
   function applyWireguardPreset(params) {
