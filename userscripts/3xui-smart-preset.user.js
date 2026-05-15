@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.3.3
+// @version      0.3.4
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
@@ -25,6 +25,7 @@
 
   const SS_METHOD = '2022-blake3-aes-256-gcm';
   const HYSTERIA_FALLBACK_SNI = 'www.bing.com';
+  const HYSTERIA_PIN_SHA256_KEY = 'xui_hysteria_pin_sha256';
 
   class Wireguard {
     static gf(init) {
@@ -213,6 +214,27 @@
     return randomSeq(count, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
   }
 
+  function normalizeSha256Fingerprint(value) {
+    if (typeof value !== 'string') return '';
+    const input = value.trim();
+    if (!input) return '';
+    const compact = input
+      .replace(/^sha-?256[:/]/i, '')
+      .replace(/[\s:-]/g, '');
+    if (!/^[a-f0-9]{64}$/i.test(compact)) {
+      return input;
+    }
+    return compact.toUpperCase().match(/.{1,2}/g).join(':');
+  }
+
+  function getHysteriaPinSha256() {
+    try {
+      return normalizeSha256Fingerprint(localStorage.getItem(HYSTERIA_PIN_SHA256_KEY) || '');
+    } catch (_e) {
+      return '';
+    }
+  }
+
   function randomBase64Bytes(length) {
     const buf = new Uint8Array(length);
     crypto.getRandomValues(buf);
@@ -352,11 +374,16 @@
 
   function hysteriaTlsSettingsPreset(cert) {
     const settings = tlsSettingsPreset(['h3'], cert);
+    const pinSha256 = getHysteriaPinSha256();
     settings.minVersion = '1.3';
     settings.maxVersion = '1.3';
     if (!hasDefaultCert(cert)) {
       settings.serverName = HYSTERIA_FALLBACK_SNI;
       settings.settings.allowInsecure = true;
+    }
+    if (pinSha256) {
+      settings.settings.pinSHA256 = pinSha256;
+      settings.settings.pinnedPeerCertSha256 = pinSha256;
     }
     return settings;
   }
@@ -508,9 +535,10 @@
     params.set('settings', JSON.stringify(settings));
     params.set('streamSettings', JSON.stringify(stream));
     params.set('sniffing', JSON.stringify(sniffingPreset()));
+    const pinText = getHysteriaPinSha256() ? ' + SHA256证书指纹' : '';
     return hasDefaultCert(cert)
-      ? '已套用 Hysteria2 + TLS1.3/h3 + 404伪装 + Salamander + BBR 安全预设'
-      : `已套用 Hysteria2 + SNI(${HYSTERIA_FALLBACK_SNI}) + skip-cert-verify + Salamander 安全兼容预设`;
+      ? `已套用 Hysteria2 + TLS1.3/h3${pinText} + 404伪装 + Salamander + BBR 安全预设`
+      : `已套用 Hysteria2 + SNI(${HYSTERIA_FALLBACK_SNI}) + skip-cert-verify${pinText} + Salamander 安全兼容预设`;
   }
 
   function applyShadowsocksPreset(params) {
@@ -675,6 +703,56 @@
       && String(url).includes('/panel/api/inbounds/add');
   }
 
+  function appendPinToHysteriaUrl(raw, pinSha256) {
+    if (!pinSha256 || !/^hy(?:steria)?2?:\/\//i.test(raw)) return raw;
+    try {
+      const url = new URL(raw);
+      if (/^hy(?:steria)?2?:$/i.test(url.protocol) && !url.searchParams.has('pinSHA256')) {
+        url.searchParams.set('pinSHA256', pinSha256);
+      }
+      return url.toString();
+    } catch (_e) {
+      const separator = raw.includes('?') ? '&' : '?';
+      return raw.includes('pinSHA256=') ? raw : `${raw}${separator}pinSHA256=${encodeURIComponent(pinSha256)}`;
+    }
+  }
+
+  function appendPinToHysteriaUrls(text, pinSha256) {
+    return text.replace(/\b(?:hy2|hysteria2?):\/\/[^\s"'<>]+/gi, (url) => appendPinToHysteriaUrl(url, pinSha256));
+  }
+
+  function addMihomoHysteriaFingerprint(text, pinSha256) {
+    if (!pinSha256 || !/type:\s*hysteria2?\b/.test(text) || /fingerprint:\s*/.test(text)) {
+      return text;
+    }
+    const lines = text.split(/\r?\n/);
+    const out = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      out.push(lines[i]);
+      if (/^\s*skip-cert-verify:\s*true\s*$/.test(lines[i])) {
+        const indent = lines[i].match(/^\s*/)?.[0] || '';
+        out.push(`${indent}fingerprint: "${pinSha256}"`);
+      }
+    }
+    return out.join('\n');
+  }
+
+  function withHysteriaPinSha256(text) {
+    const pinSha256 = getHysteriaPinSha256();
+    if (!pinSha256 || typeof text !== 'string') return text;
+    const updated = addMihomoHysteriaFingerprint(appendPinToHysteriaUrls(text, pinSha256), pinSha256);
+    if (updated !== text) {
+      toast('已为 Hysteria2 链接补上 pinSHA256 / SHA256 fingerprint');
+    }
+    return updated;
+  }
+
+  function patchClipboardPinSha256() {
+    if (!navigator.clipboard?.writeText) return;
+    const rawWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
+    navigator.clipboard.writeText = (text) => rawWriteText(withHysteriaPinSha256(text));
+  }
+
   const rawOpen = XMLHttpRequest.prototype.open;
   const rawSend = XMLHttpRequest.prototype.send;
 
@@ -711,4 +789,6 @@
       return rawFetch(input, init);
     };
   }
+
+  patchClipboardPinSha256();
 })();

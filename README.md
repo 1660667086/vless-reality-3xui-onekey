@@ -95,7 +95,7 @@ userscripts/3xui-smart-preset.user.js
 
 - `vless`：自动改成 `VLESS + TCP + REALITY + Vision + uTLS(chrome)`
 - `trojan`：自动改成 `Trojan + TCP + REALITY + uTLS(chrome)`
-- `hysteria`：安全预设为 `Hysteria2 + TLS1.3/h3 + 404 伪装页 + Salamander 混淆 + BBR QUIC 参数`；没有面板默认 TLS 证书时会生成类似 `sni: www.bing.com`、`skip-cert-verify: true` 的兼容配置，不阻止创建
+- `hysteria`：安全预设为 `Hysteria2 + TLS1.3/h3 + 404 伪装页 + Salamander 混淆 + BBR QUIC 参数`；没有面板默认 TLS 证书时会生成类似 `sni: www.bing.com`、`skip-cert-verify: true` 的兼容配置，不阻止创建；如果配置了 SHA256 证书指纹，复制链接时会自动补 `pinSHA256`，复制 mihomo/Clash YAML 时会自动补 `fingerprint`
 - `shadowsocks`：有默认 TLS 证书时使用 `Shadowsocks 2022 + TCP-only + TLS + ivCheck`；没有证书时自动降级为 `Shadowsocks 2022 + TCP-only + ivCheck`
 - `wireguard`：自动生成服务端和客户端密钥，设置 MTU `1280`、keepalive `25` 和独立内网地址
 - `mixed`：默认只监听 `127.0.0.1`，强账号密码，关闭 UDP，避免公网裸露
@@ -104,6 +104,24 @@ userscripts/3xui-smart-preset.user.js
 - `tun`：默认只监听 `127.0.0.1`，`xray0`、MTU `1280`、保守网关和 DNS
 
 注意：这个用户脚本是浏览器侧增强，不改 3x-ui 服务端二进制。它适合现有面板快速使用；如果要真正做进 3x-ui 源码，需要维护自定义 3x-ui 前端构建。
+
+Hysteria2 的 SHA256 证书指纹必须来自真实服务端证书，脚本不会生成假的指纹。需要 pin 时，在服务器上按你的证书路径计算：
+
+```bash
+openssl x509 -noout -fingerprint -sha256 -in /path/to/fullchain.pem
+```
+
+然后在 3x-ui 面板页面打开浏览器开发者工具 Console，保存一次：
+
+```js
+localStorage.setItem('xui_hysteria_pin_sha256', 'AA:BB:CC:...:FF')
+```
+
+以后创建 Hysteria2 入站会把这个值写入 TLS 设置；复制 `hysteria2://` 链接时会自动追加 `pinSHA256`，复制 mihomo/Clash YAML 时会自动追加 `fingerprint`。如果要取消：
+
+```js
+localStorage.removeItem('xui_hysteria_pin_sha256')
+```
 
 `--preset-only` 不会重新安装 3x-ui，也不会重置面板账号。它会读取最近的 `/root/3x-ui-reality-install-*.txt` 结果文件里的面板连接信息，然后自动创建：
 
