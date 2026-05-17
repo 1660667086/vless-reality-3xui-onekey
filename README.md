@@ -190,6 +190,12 @@ sudo bash install-vless-reality-3xui.sh \
   --users 'u1:30:100:2,u2:60:0:0'
 ```
 
+如果面板已经装好，只想给 Hysteria2 预设补上自签证书和 SHA256 指纹，不重置面板、不创建节点：
+
+```bash
+sudo bash install-vless-reality-3xui.sh --hysteria-cert-only
+```
+
 ## 只装面板
 
 如果你想自己在面板里手动配置入站节点：

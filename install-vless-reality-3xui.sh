@@ -46,6 +46,7 @@ AUTO_SWAP="${AUTO_SWAP:-1}"
 SWAP_SIZE_MB="${SWAP_SIZE_MB:-1024}"
 SWAP_THRESHOLD_MB="${SWAP_THRESHOLD_MB:-1024}"
 SWAP_FILE="${SWAP_FILE:-/swapfile}"
+HYSTERIA_CERT_ONLY="${HYSTERIA_CERT_ONLY:-0}"
 INSTALL_TMP=""
 
 SELF_REPO="${SELF_REPO:-1660667086/vless-reality-3xui-onekey}"
@@ -94,6 +95,7 @@ usage() {
   --check-upstream-update 只检查官方 3x-ui 是否有新版本，不安装
   --update-3xui           从官方 3x-ui 上游下载最新版并更新面板程序
   --hysteria-sni DOMAIN   Hysteria2 自签证书 SNI。默认 www.bing.com
+  --hysteria-cert-only    只生成/更新 Hysteria2 自签证书，不改面板、不创建节点
   -h, --help              显示帮助
 
 示例:
@@ -157,6 +159,7 @@ parse_args() {
       --check-upstream-update) CHECK_UPSTREAM_UPDATE=1; shift ;;
       --update-3xui) UPDATE_3XUI=1; shift ;;
       --hysteria-sni) HYSTERIA_SNI="$2"; shift 2 ;;
+      --hysteria-cert-only) HYSTERIA_CERT_ONLY=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数: $1" ;;
     esac
@@ -594,6 +597,18 @@ ensure_hysteria_self_signed_cert() {
   chmod 644 "${HYSTERIA_CERT_FP_FILE}"
 }
 
+print_hysteria_cert_summary() {
+  echo
+  echo "============================================================"
+  echo "Hysteria2 自签证书已准备好"
+  echo "证书: ${HYSTERIA_CERT_FILE}"
+  echo "私钥: ${HYSTERIA_KEY_FILE}"
+  echo "SNI: ${HYSTERIA_SNI}"
+  echo "SHA256: $(cat "${HYSTERIA_CERT_FP_FILE}" 2>/dev/null || true)"
+  echo "============================================================"
+  echo
+}
+
 enable_bbr() {
   [[ "${ENABLE_BBR}" == "1" ]] || return
   log "正在尝试开启 BBR"
@@ -912,6 +927,14 @@ main() {
   fi
 
   require_root
+
+  if [[ "${HYSTERIA_CERT_ONLY}" == "1" ]]; then
+    require_cmd openssl
+    ensure_hysteria_self_signed_cert
+    print_hysteria_cert_summary
+    return
+  fi
+
   require_systemd
   preflight_disk_space
   ensure_auto_swap
