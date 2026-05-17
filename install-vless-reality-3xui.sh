@@ -7,6 +7,11 @@ set -Eeuo pipefail
 XUI_DIR="/usr/local/x-ui"
 XUI_BIN="${XUI_DIR}/x-ui"
 XUI_SERVICE_FILE="/etc/systemd/system/x-ui.service"
+HYSTERIA_CERT_DIR="${HYSTERIA_CERT_DIR:-${XUI_DIR}/cert}"
+HYSTERIA_CERT_FILE="${HYSTERIA_CERT_FILE:-${HYSTERIA_CERT_DIR}/hysteria-selfsigned.crt}"
+HYSTERIA_KEY_FILE="${HYSTERIA_KEY_FILE:-${HYSTERIA_CERT_DIR}/hysteria-selfsigned.key}"
+HYSTERIA_CERT_FP_FILE="${HYSTERIA_CERT_FP_FILE:-${HYSTERIA_CERT_DIR}/hysteria-selfsigned.sha256}"
+HYSTERIA_SNI="${HYSTERIA_SNI:-www.bing.com}"
 
 PANEL_USER="${PANEL_USER:-}"
 PANEL_PASS="${PANEL_PASS:-}"
@@ -88,6 +93,7 @@ usage() {
   --upstream-repo REPO    3x-ui 上游仓库。默认 MHSanaei/3x-ui
   --check-upstream-update 只检查官方 3x-ui 是否有新版本，不安装
   --update-3xui           从官方 3x-ui 上游下载最新版并更新面板程序
+  --hysteria-sni DOMAIN   Hysteria2 自签证书 SNI。默认 www.bing.com
   -h, --help              显示帮助
 
 示例:
@@ -150,6 +156,7 @@ parse_args() {
       --upstream-repo) UPSTREAM_3XUI_REPO="$2"; shift 2 ;;
       --check-upstream-update) CHECK_UPSTREAM_UPDATE=1; shift ;;
       --update-3xui) UPDATE_3XUI=1; shift ;;
+      --hysteria-sni) HYSTERIA_SNI="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数: $1" ;;
     esac
@@ -566,6 +573,27 @@ configure_panel() {
   die "3x-ui 面板未能在 127.0.0.1:${PANEL_PORT} 正常访问。"
 }
 
+ensure_hysteria_self_signed_cert() {
+  mkdir -p "${HYSTERIA_CERT_DIR}"
+
+  if [[ -s "${HYSTERIA_CERT_FILE}" && -s "${HYSTERIA_KEY_FILE}" ]]; then
+    log "Hysteria2 自签证书已存在: ${HYSTERIA_CERT_FILE}"
+  else
+    log "正在生成 Hysteria2 自签证书，SNI: ${HYSTERIA_SNI}"
+    openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+      -keyout "${HYSTERIA_KEY_FILE}" \
+      -out "${HYSTERIA_CERT_FILE}" \
+      -subj "/CN=${HYSTERIA_SNI}" \
+      -addext "subjectAltName=DNS:${HYSTERIA_SNI}" >/dev/null 2>&1
+  fi
+
+  chmod 600 "${HYSTERIA_KEY_FILE}"
+  chmod 644 "${HYSTERIA_CERT_FILE}"
+  openssl x509 -noout -fingerprint -sha256 -in "${HYSTERIA_CERT_FILE}" \
+    | cut -d= -f2 > "${HYSTERIA_CERT_FP_FILE}"
+  chmod 644 "${HYSTERIA_CERT_FP_FILE}"
+}
+
 enable_bbr() {
   [[ "${ENABLE_BBR}" == "1" ]] || return
   log "正在尝试开启 BBR"
@@ -851,6 +879,11 @@ write_result() {
     echo "REALITY 公钥: ${REALITY_PUBLIC_KEY}"
     echo "REALITY short ID: ${REALITY_SHORT_ID}"
     echo
+    echo "Hysteria2 自签证书: ${HYSTERIA_CERT_FILE}"
+    echo "Hysteria2 私钥: ${HYSTERIA_KEY_FILE}"
+    echo "Hysteria2 SHA256 指纹: $(cat "${HYSTERIA_CERT_FP_FILE}" 2>/dev/null || true)"
+    echo "Hysteria2 伪装 SNI: ${HYSTERIA_SNI}"
+    echo
     echo "客户端链接:"
     jq -r '.[] | "- " + .email + " | 到期: " + .expiry + "\n  " + .link' <<< "${links_json}"
   } > "${result_file}"
@@ -861,6 +894,8 @@ write_result() {
   echo "面板地址: http://${SERVER_ADDR}:${PANEL_PORT}/${PANEL_PATH}/"
   echo "用户名: ${PANEL_USER}"
   echo "密码: ${PANEL_PASS}"
+  echo "Hysteria2 自签证书: ${HYSTERIA_CERT_FILE}"
+  echo "Hysteria2 SHA256: $(cat "${HYSTERIA_CERT_FP_FILE}" 2>/dev/null || true)"
   echo "结果文件: ${result_file}"
   echo "============================================================"
   echo
@@ -885,6 +920,7 @@ main() {
     install_packages
     FORCE_REINSTALL=1
     install_3xui upstream
+    ensure_hysteria_self_signed_cert
     systemctl restart x-ui
     log "3x-ui 已从官方上游更新完成。默认安装源仍是你的独立镜像。"
     return
@@ -893,6 +929,7 @@ main() {
   if [[ "${PRESET_ONLY}" == "1" ]]; then
     require_basic_tools
     set_defaults
+    ensure_hysteria_self_signed_cert
     open_firewall
     create_inbound
     return
@@ -901,6 +938,7 @@ main() {
   install_packages
   set_defaults
   install_3xui
+  ensure_hysteria_self_signed_cert
   configure_panel
   enable_bbr
   open_firewall
@@ -912,6 +950,8 @@ main() {
     echo "面板地址: http://${SERVER_ADDR}:${PANEL_PORT}/${PANEL_PATH}/"
     echo "用户名: ${PANEL_USER}"
     echo "密码: ${PANEL_PASS}"
+    echo "Hysteria2 自签证书: ${HYSTERIA_CERT_FILE}"
+    echo "Hysteria2 SHA256: $(cat "${HYSTERIA_CERT_FP_FILE}" 2>/dev/null || true)"
   fi
 }
 

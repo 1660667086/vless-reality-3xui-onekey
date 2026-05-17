@@ -95,7 +95,7 @@ userscripts/3xui-smart-preset.user.js
 
 - `vless`：自动改成 `VLESS + TCP + REALITY + Vision + uTLS(chrome)`
 - `trojan`：自动改成 `Trojan + TCP + REALITY + uTLS(chrome)`
-- `hysteria`：安全预设为 `Hysteria2 + TLS1.3/h3 + 404 伪装页 + Salamander 混淆 + BBR QUIC 参数`；没有面板默认 TLS 证书时会生成类似 `sni: www.bing.com`、`skip-cert-verify: true` 的兼容配置，不阻止创建；二维码和复制链接会自动补 `insecure=1`，如果配置了 SHA256 证书指纹，还会自动补 `pinSHA256` / `fingerprint`，复制 mihomo/Clash YAML 时会自动补 `fingerprint`
+- `hysteria`：按可用的独立 Hysteria2 脚本风格预设为 `Hysteria2 + TLS1.3/h3 + SNI www.bing.com + 自签证书 + skip-cert-verify + Bing 反代伪装 + Salamander 混淆 + BBR QUIC 参数`；脚本会生成 `/usr/local/x-ui/cert/hysteria-selfsigned.crt` 和 `.key` 供 3x-ui 入站使用；二维码和复制链接会自动补 `insecure=1`，如果配置了 SHA256 证书指纹，还会自动补 `pinSHA256` / `fingerprint`，复制 mihomo/Clash YAML 时会自动补 `fingerprint`。Hysteria 会优先尝试 UDP `443`，如果 3x-ui 已有 `443` 入站，会保留当前端口并提示你放行对应 UDP 端口
 - `shadowsocks`：有默认 TLS 证书时使用 `Shadowsocks 2022 + TCP-only + TLS + ivCheck`；没有证书时自动降级为 `Shadowsocks 2022 + TCP-only + ivCheck`
 - `wireguard`：自动生成服务端和客户端密钥，设置 MTU `1280`、keepalive `25` 和独立内网地址
 - `mixed`：默认只监听 `127.0.0.1`，强账号密码，关闭 UDP，避免公网裸露
@@ -105,10 +105,16 @@ userscripts/3xui-smart-preset.user.js
 
 注意：这个用户脚本是浏览器侧增强，不改 3x-ui 服务端二进制。它适合现有面板快速使用；如果要真正做进 3x-ui 源码，需要维护自定义 3x-ui 前端构建。
 
-Hysteria2 的 SHA256 证书指纹必须来自真实服务端证书，脚本不会生成假的指纹。需要 pin 时，在服务器上按你的证书路径计算：
+Hysteria2 的 SHA256 证书指纹必须来自实际服务端证书，可以是真实 CA 证书，也可以是脚本生成的自签证书。安装脚本会把自签证书指纹写到：
 
 ```bash
-openssl x509 -noout -fingerprint -sha256 -in /path/to/fullchain.pem
+/usr/local/x-ui/cert/hysteria-selfsigned.sha256
+```
+
+需要手动计算时，在服务器上按你的证书路径执行：
+
+```bash
+openssl x509 -noout -fingerprint -sha256 -in /usr/local/x-ui/cert/hysteria-selfsigned.crt
 ```
 
 然后在 3x-ui 入站页面右下角点击 `HY2 SHA256 未设`，填入指纹并关闭重开二维码。也可以打开浏览器开发者工具 Console 手动保存：

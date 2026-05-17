@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3x-ui 入站智能伪装预设
 // @namespace    https://github.com/1660667086/vless-reality-3xui-onekey
-// @version      0.3.7
+// @version      0.3.8
 // @description  在 3x-ui 添加入站时，按协议自动补全推荐伪装参数，减少手动配置错误。
 // @match        http://*/panel/inbounds*
 // @match        https://*/panel/inbounds*
@@ -24,7 +24,11 @@
   ];
 
   const SS_METHOD = '2022-blake3-aes-256-gcm';
+  const HYSTERIA_PREFERRED_PORT = '443';
   const HYSTERIA_FALLBACK_SNI = 'www.bing.com';
+  const HYSTERIA_MASQUERADE_URL = 'https://www.bing.com/';
+  const HYSTERIA_COMPAT_CERT_FILE = '/usr/local/x-ui/cert/hysteria-selfsigned.crt';
+  const HYSTERIA_COMPAT_KEY_FILE = '/usr/local/x-ui/cert/hysteria-selfsigned.key';
   const HYSTERIA_PIN_SHA256_KEY = 'xui_hysteria_pin_sha256';
   let nativeUrlToString = null;
 
@@ -307,16 +311,50 @@
         return {
           certFile: msg.obj.defaultCert,
           keyFile: msg.obj.defaultKey,
+          source: 'panel',
         };
       }
     } catch (_e) {
       // 没有默认 TLS 证书时继续填基础结构，避免影响其他协议。
     }
-    return { certFile: '', keyFile: '' };
+    return { certFile: '', keyFile: '', source: '' };
   }
 
   function hasDefaultCert(cert) {
     return Boolean(cert?.certFile && cert?.keyFile);
+  }
+
+  function hysteriaCompatCertSettings() {
+    return {
+      certFile: HYSTERIA_COMPAT_CERT_FILE,
+      keyFile: HYSTERIA_COMPAT_KEY_FILE,
+      source: 'self-signed',
+    };
+  }
+
+  function getHysteriaCertSettingsSync() {
+    const cert = getDefaultCertSettingsSync();
+    return hasDefaultCert(cert) ? cert : hysteriaCompatCertSettings();
+  }
+
+  function portExistsSync(port) {
+    try {
+      const msg = getJsonSync('GET', '/panel/api/inbounds/list');
+      const rows = Array.isArray(msg?.obj) ? msg.obj : [];
+      return rows.some((row) => String(row?.port) === String(port));
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  function preferHysteriaPort(params) {
+    const current = String(params.get('port') || '').trim();
+    if (current === HYSTERIA_PREFERRED_PORT) return '';
+    if (portExistsSync(HYSTERIA_PREFERRED_PORT)) {
+      return `；443 已被面板占用，保留端口 ${current || '当前值'}，请放行 UDP`;
+    }
+    params.set('port', HYSTERIA_PREFERRED_PORT);
+    return '；端口已设为 UDP 443';
   }
 
   function sniffingPreset(enabled = true) {
@@ -392,10 +430,9 @@
     const pinSha256 = getHysteriaPinSha256();
     settings.minVersion = '1.3';
     settings.maxVersion = '1.3';
-    if (!hasDefaultCert(cert)) {
-      settings.serverName = HYSTERIA_FALLBACK_SNI;
-      settings.settings.allowInsecure = true;
-    }
+    settings.serverName = HYSTERIA_FALLBACK_SNI;
+    settings.rejectUnknownSni = false;
+    settings.settings.allowInsecure = true;
     if (pinSha256) {
       settings.settings.pinSHA256 = pinSha256;
       settings.settings.pinnedPeerCertSha256 = pinSha256;
@@ -496,7 +533,8 @@
   function applyHysteriaPreset(params) {
     const settings = parseJson(params.get('settings'), {});
     const stream = parseJson(params.get('streamSettings'), {});
-    const cert = getDefaultCertSettingsSync();
+    const cert = getHysteriaCertSettingsSync();
+    const portText = preferHysteriaPort(params);
     settings.version = 2;
     ensureClients(settings, (client) => ({
       auth: typeof client.auth === 'string' && client.auth.length >= 24 ? client.auth : randomUuid(),
@@ -512,18 +550,14 @@
       auth: primaryAuth,
       udpIdleTimeout: 30,
       masquerade: {
-        type: 'string',
+        type: 'proxy',
         dir: '',
-        url: '',
-        rewriteHost: false,
+        url: HYSTERIA_MASQUERADE_URL,
+        rewriteHost: true,
         insecure: false,
-        content: '<!doctype html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>',
-        headers: {
-          'content-type': 'text/html; charset=utf-8',
-          'cache-control': 'no-store',
-          'x-content-type-options': 'nosniff',
-        },
-        statusCode: 404,
+        content: '',
+        headers: {},
+        statusCode: 0,
       },
     };
     stream.finalmask = {
@@ -551,9 +585,8 @@
     params.set('streamSettings', JSON.stringify(stream));
     params.set('sniffing', JSON.stringify(sniffingPreset()));
     const pinText = getHysteriaPinSha256() ? ' + SHA256证书指纹' : '';
-    return hasDefaultCert(cert)
-      ? `已套用 Hysteria2 + TLS1.3/h3${pinText} + 404伪装 + Salamander + BBR 安全预设`
-      : `已套用 Hysteria2 + SNI(${HYSTERIA_FALLBACK_SNI}) + skip-cert-verify${pinText} + Salamander 安全兼容预设`;
+    const certText = cert.source === 'panel' ? '面板证书' : '自签证书';
+    return `已套用 Hysteria2 + SNI(${HYSTERIA_FALLBACK_SNI}) + ${certText} + skip-cert-verify${pinText} + Bing反代伪装 + Salamander + BBR${portText}`;
   }
 
   function applyShadowsocksPreset(params) {
