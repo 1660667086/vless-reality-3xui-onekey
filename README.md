@@ -4,11 +4,18 @@
 
 ## 一键安装
 
-把脚本上传到服务器后执行：
+新机器完整一键安装直接执行，不要带 `--hysteria-cert-only`：
 
 ```bash
 sudo bash install-vless-reality-3xui.sh
 ```
+
+完整安装会一次完成：
+
+- 安装 3x-ui Web 面板
+- 自动创建 `VLESS + TCP + REALITY + Vision` 入站
+- 自动生成 Hysteria2 自签证书和 SHA256 指纹，给浏览器智能预设使用
+- 输出面板地址、用户名、密码、客户端链接和证书信息
 
 默认安装源是你自己仓库的 GitHub Release 镜像，不会直接从 3x-ui 官方上游下载面板安装包：
 
@@ -194,6 +201,12 @@ sudo bash install-vless-reality-3xui.sh \
 
 ```bash
 sudo bash install-vless-reality-3xui.sh --hysteria-cert-only
+```
+
+注意：`--hysteria-cert-only` 不会安装 3x-ui 面板。新机器完整安装请运行不带参数的：
+
+```bash
+sudo bash install-vless-reality-3xui.sh
 ```
 
 ## 只装面板

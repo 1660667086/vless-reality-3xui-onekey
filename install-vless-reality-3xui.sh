@@ -12,6 +12,7 @@ HYSTERIA_CERT_FILE="${HYSTERIA_CERT_FILE:-${HYSTERIA_CERT_DIR}/hysteria-selfsign
 HYSTERIA_KEY_FILE="${HYSTERIA_KEY_FILE:-${HYSTERIA_CERT_DIR}/hysteria-selfsigned.key}"
 HYSTERIA_CERT_FP_FILE="${HYSTERIA_CERT_FP_FILE:-${HYSTERIA_CERT_DIR}/hysteria-selfsigned.sha256}"
 HYSTERIA_SNI="${HYSTERIA_SNI:-www.bing.com}"
+SMART_PRESET_URL="${SMART_PRESET_URL:-https://raw.githubusercontent.com/1660667086/vless-reality-3xui-onekey/main/userscripts/3xui-smart-preset.user.js}"
 
 PANEL_USER="${PANEL_USER:-}"
 PANEL_PASS="${PANEL_PASS:-}"
@@ -99,6 +100,7 @@ usage() {
   -h, --help              显示帮助
 
 示例:
+  # 完整一键安装：面板 + VLESS REALITY + Hysteria2 自签证书
   sudo bash install-vless-reality-3xui.sh
   sudo env USERS='alice:30:100:2,bob:7:0:0' bash install-vless-reality-3xui.sh
   sudo env PANEL_PORT=25443 INBOUND_PORT=443 EXPIRE_DAYS=90 bash install-vless-reality-3xui.sh
@@ -172,6 +174,21 @@ require_root() {
 
 require_systemd() {
   command -v systemctl >/dev/null 2>&1 || die "当前脚本需要运行在 systemd Linux VPS 上。"
+}
+
+require_installed_3xui_for_cert_only() {
+  if [[ ! -x "${XUI_BIN}" ]]; then
+    die "--hysteria-cert-only 只用于已经安装好 3x-ui 的服务器。
+
+新机器完整安装请运行:
+  sudo bash install-vless-reality-3xui.sh
+
+完整安装会自动包含:
+  1. 安装 3x-ui 面板
+  2. 创建 VLESS REALITY Vision 入站
+  3. 生成 Hysteria2 自签证书和 SHA256 指纹
+  4. 输出面板地址、账号密码和客户端链接"
+  fi
 }
 
 require_cmd() {
@@ -606,6 +623,7 @@ print_hysteria_cert_summary() {
   echo "SNI: ${HYSTERIA_SNI}"
   echo "SHA256: $(cat "${HYSTERIA_CERT_FP_FILE}" 2>/dev/null || true)"
   echo "============================================================"
+  echo "说明: 这个参数只补 Hysteria2 证书，不安装面板。完整安装不要带 --hysteria-cert-only。"
   echo
 }
 
@@ -899,6 +917,9 @@ write_result() {
     echo "Hysteria2 SHA256 指纹: $(cat "${HYSTERIA_CERT_FP_FILE}" 2>/dev/null || true)"
     echo "Hysteria2 伪装 SNI: ${HYSTERIA_SNI}"
     echo
+    echo "浏览器智能预设脚本:"
+    echo "${SMART_PRESET_URL}"
+    echo
     echo "客户端链接:"
     jq -r '.[] | "- " + .email + " | 到期: " + .expiry + "\n  " + .link' <<< "${links_json}"
   } > "${result_file}"
@@ -911,6 +932,7 @@ write_result() {
   echo "密码: ${PANEL_PASS}"
   echo "Hysteria2 自签证书: ${HYSTERIA_CERT_FILE}"
   echo "Hysteria2 SHA256: $(cat "${HYSTERIA_CERT_FP_FILE}" 2>/dev/null || true)"
+  echo "浏览器智能预设脚本: ${SMART_PRESET_URL}"
   echo "结果文件: ${result_file}"
   echo "============================================================"
   echo
@@ -930,6 +952,7 @@ main() {
 
   if [[ "${HYSTERIA_CERT_ONLY}" == "1" ]]; then
     require_cmd openssl
+    require_installed_3xui_for_cert_only
     ensure_hysteria_self_signed_cert
     print_hysteria_cert_summary
     return
@@ -975,6 +998,7 @@ main() {
     echo "密码: ${PANEL_PASS}"
     echo "Hysteria2 自签证书: ${HYSTERIA_CERT_FILE}"
     echo "Hysteria2 SHA256: $(cat "${HYSTERIA_CERT_FP_FILE}" 2>/dev/null || true)"
+    echo "浏览器智能预设脚本: ${SMART_PRESET_URL}"
   fi
 }
 
