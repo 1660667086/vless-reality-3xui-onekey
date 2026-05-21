@@ -4,10 +4,21 @@
 
 ## 一键安装
 
-新机器完整一键安装直接执行，不要带 `--hysteria-cert-only`：
+新机器完整一键安装直接执行，不要带 `--hysteria-cert-only`。脚本会自动识别权限：root 直接安装；普通用户会自动调用 `sudo`；极简系统没有 `sudo` 时，先切换到 root 后运行同一条命令即可。
+
+通用拉取安装：
 
 ```bash
-sudo bash install-vless-reality-3xui.sh
+curl -fsSL -o install-vless-reality-3xui.sh \
+  https://raw.githubusercontent.com/1660667086/vless-reality-3xui-onekey/main/install-vless-reality-3xui.sh
+chmod +x install-vless-reality-3xui.sh
+bash install-vless-reality-3xui.sh
+```
+
+已经下载好脚本时：
+
+```bash
+bash install-vless-reality-3xui.sh
 ```
 
 完整安装会一次完成：
@@ -35,25 +46,25 @@ sudo bash install-vless-reality-3xui.sh
 日常安装默认走你自己的镜像：
 
 ```bash
-sudo bash install-vless-reality-3xui.sh
+bash install-vless-reality-3xui.sh
 ```
 
 检查官方 3x-ui 上游是否有新版本：
 
 ```bash
-sudo bash install-vless-reality-3xui.sh --check-upstream-update
+bash install-vless-reality-3xui.sh --check-upstream-update
 ```
 
 确认要更新面板程序时，才从官方上游下载最新版并安装：
 
 ```bash
-sudo bash install-vless-reality-3xui.sh --update-3xui
+bash install-vless-reality-3xui.sh --update-3xui
 ```
 
 如果你临时想绕过镜像、直接用官方上游安装，也可以显式指定：
 
 ```bash
-sudo env INSTALL_SOURCE=upstream bash install-vless-reality-3xui.sh
+env INSTALL_SOURCE=upstream bash install-vless-reality-3xui.sh
 ```
 
 ## 多用户和到期时间
@@ -67,7 +78,7 @@ sudo env INSTALL_SOURCE=upstream bash install-vless-reality-3xui.sh
 例子：
 
 ```bash
-sudo env USERS='alice:30:100:2,bob:7:0:0,charlie:90:300:3' \
+env USERS='alice:30:100:2,bob:7:0:0,charlie:90:300:3' \
   bash install-vless-reality-3xui.sh
 ```
 
@@ -86,7 +97,7 @@ sudo env USERS='alice:30:100:2,bob:7:0:0,charlie:90:300:3' \
 不建议在面板里手动填 REALITY、Vision、uTLS、SNI、shortId 等参数，容易少填或填错。面板已安装后，可以直接用脚本创建推荐预设节点：
 
 ```bash
-sudo env INBOUND_PORT=8443 USERS='newuser:30:100:2' \
+env INBOUND_PORT=8443 USERS='newuser:30:100:2' \
   bash install-vless-reality-3xui.sh --preset-only
 ```
 
@@ -146,7 +157,7 @@ localStorage.removeItem('xui_hysteria_pin_sha256')
 如果结果文件不存在，可以手动传入面板信息：
 
 ```bash
-sudo env \
+env \
   PANEL_USER='你的面板用户名' \
   PANEL_PASS='你的面板密码' \
   PANEL_PORT=面板端口 \
@@ -159,7 +170,7 @@ sudo env \
 ## 常用参数
 
 ```bash
-sudo env \
+env \
   PANEL_PORT=25443 \
   INBOUND_PORT=443 \
   SERVER_ADDR=你的服务器IP或域名 \
@@ -174,23 +185,23 @@ sudo env \
 如果 `/tmp` 分区很小，可以指定临时目录和最低空间要求：
 
 ```bash
-sudo env TMPDIR=/root DISK_MIN_MB=512 bash install-vless-reality-3xui.sh
+env TMPDIR=/root DISK_MIN_MB=512 bash install-vless-reality-3xui.sh
 ```
 
 小内存机器会自动识别 swap：默认在内存低于 1GB 且没有 swap 时创建 1GB `/swapfile`，启用后写入 `/etc/fstab`。
 
 ```bash
 # 不自动创建 swap
-sudo bash install-vless-reality-3xui.sh --no-swap
+bash install-vless-reality-3xui.sh --no-swap
 
 # 改成自动创建 2GB swap
-sudo bash install-vless-reality-3xui.sh --swap-size-mb 2048
+bash install-vless-reality-3xui.sh --swap-size-mb 2048
 ```
 
 也可以用命令参数：
 
 ```bash
-sudo bash install-vless-reality-3xui.sh \
+bash install-vless-reality-3xui.sh \
   --panel-port 25443 \
   --inbound-port 443 \
   --sni www.microsoft.com \
@@ -200,13 +211,13 @@ sudo bash install-vless-reality-3xui.sh \
 如果面板已经装好，只想给 Hysteria2 预设补上自签证书和 SHA256 指纹，不重置面板、不创建节点：
 
 ```bash
-sudo bash install-vless-reality-3xui.sh --hysteria-cert-only
+bash install-vless-reality-3xui.sh --hysteria-cert-only
 ```
 
 注意：`--hysteria-cert-only` 不会安装 3x-ui 面板。新机器完整安装请运行不带参数的：
 
 ```bash
-sudo bash install-vless-reality-3xui.sh
+bash install-vless-reality-3xui.sh
 ```
 
 ## 只装面板
@@ -214,7 +225,7 @@ sudo bash install-vless-reality-3xui.sh
 如果你想自己在面板里手动配置入站节点：
 
 ```bash
-sudo bash install-vless-reality-3xui.sh --no-inbound
+bash install-vless-reality-3xui.sh --no-inbound
 ```
 
 手动配置建议：

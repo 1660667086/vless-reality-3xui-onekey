@@ -66,7 +66,11 @@ plain='\033[0m'
 usage() {
   cat <<'EOF'
 用法:
-  sudo bash install-vless-reality-3xui.sh [options]
+  bash install-vless-reality-3xui.sh [options]
+
+权限:
+  root 用户直接运行即可；普通用户运行时脚本会自动检测 sudo 并提权。
+  极简系统如果没有 sudo，请先切换到 root，再执行同一条 bash 命令。
 
 参数:
   --panel-port PORT       Web 面板端口。默认随机高位端口
@@ -101,13 +105,13 @@ usage() {
 
 示例:
   # 完整一键安装：面板 + VLESS REALITY + Hysteria2 自签证书
-  sudo bash install-vless-reality-3xui.sh
-  sudo env USERS='alice:30:100:2,bob:7:0:0' bash install-vless-reality-3xui.sh
-  sudo env PANEL_PORT=25443 INBOUND_PORT=443 EXPIRE_DAYS=90 bash install-vless-reality-3xui.sh
-  sudo env DISK_MIN_MB=512 TMPDIR=/root bash install-vless-reality-3xui.sh
-  sudo env INBOUND_PORT=8443 USERS='newuser:30:100:2' bash install-vless-reality-3xui.sh --preset-only
-  sudo bash install-vless-reality-3xui.sh --check-upstream-update
-  sudo bash install-vless-reality-3xui.sh --update-3xui
+  bash install-vless-reality-3xui.sh
+  env USERS='alice:30:100:2,bob:7:0:0' bash install-vless-reality-3xui.sh
+  env PANEL_PORT=25443 INBOUND_PORT=443 EXPIRE_DAYS=90 bash install-vless-reality-3xui.sh
+  env DISK_MIN_MB=512 TMPDIR=/root bash install-vless-reality-3xui.sh
+  env INBOUND_PORT=8443 USERS='newuser:30:100:2' bash install-vless-reality-3xui.sh --preset-only
+  bash install-vless-reality-3xui.sh --check-upstream-update
+  bash install-vless-reality-3xui.sh --update-3xui
 EOF
 }
 
@@ -169,7 +173,81 @@ parse_args() {
 }
 
 require_root() {
-  [[ "${EUID}" -eq 0 ]] || die "请使用 root 权限运行，例如: sudo bash $0"
+  [[ "${EUID}" -eq 0 ]] && return
+
+  local script_path="$0"
+  if [[ ! -f "${script_path}" ]]; then
+    script_path="$(command -v "$0" 2>/dev/null || true)"
+  fi
+  if [[ -n "${script_path}" && -f "${script_path}" ]]; then
+    if command -v realpath >/dev/null 2>&1; then
+      script_path="$(realpath "${script_path}")"
+    elif command -v readlink >/dev/null 2>&1; then
+      script_path="$(readlink -f "${script_path}" 2>/dev/null || printf '%s' "${script_path}")"
+    fi
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    [[ -n "${script_path}" && -f "${script_path}" ]] || die "当前不是 root，已检测到 sudo，但脚本不是可重新执行的本地文件。
+请先下载到本地文件后再运行:
+  curl -fsSL -o install-vless-reality-3xui.sh https://raw.githubusercontent.com/${SELF_REPO}/main/install-vless-reality-3xui.sh
+  bash install-vless-reality-3xui.sh"
+
+    local -a keep_env=(
+      "XUI_DIR=${XUI_DIR}"
+      "HYSTERIA_CERT_DIR=${HYSTERIA_CERT_DIR}"
+      "HYSTERIA_CERT_FILE=${HYSTERIA_CERT_FILE}"
+      "HYSTERIA_KEY_FILE=${HYSTERIA_KEY_FILE}"
+      "HYSTERIA_CERT_FP_FILE=${HYSTERIA_CERT_FP_FILE}"
+      "HYSTERIA_SNI=${HYSTERIA_SNI}"
+      "SMART_PRESET_URL=${SMART_PRESET_URL}"
+      "PANEL_USER=${PANEL_USER}"
+      "PANEL_PASS=${PANEL_PASS}"
+      "PANEL_PORT=${PANEL_PORT}"
+      "PANEL_PATH=${PANEL_PATH}"
+      "INBOUND_PORT=${INBOUND_PORT}"
+      "INBOUND_REMARK=${INBOUND_REMARK}"
+      "SERVER_ADDR=${SERVER_ADDR}"
+      "REALITY_SNI=${REALITY_SNI}"
+      "REALITY_TARGET=${REALITY_TARGET}"
+      "REALITY_PRIVATE_KEY=${REALITY_PRIVATE_KEY}"
+      "REALITY_PUBLIC_KEY=${REALITY_PUBLIC_KEY}"
+      "REALITY_SHORT_ID=${REALITY_SHORT_ID}"
+      "UTLS_FINGERPRINT=${UTLS_FINGERPRINT}"
+      "SPIDER_X=${SPIDER_X}"
+      "FIRST_USER=${FIRST_USER}"
+      "EXPIRE_DAYS=${EXPIRE_DAYS}"
+      "TOTAL_GB=${TOTAL_GB}"
+      "LIMIT_IP=${LIMIT_IP}"
+      "USERS=${USERS}"
+      "AUTO_CREATE_INBOUND=${AUTO_CREATE_INBOUND}"
+      "PRESET_ONLY=${PRESET_ONLY}"
+      "ENABLE_BBR=${ENABLE_BBR}"
+      "OPEN_FIREWALL=${OPEN_FIREWALL}"
+      "FORCE_REINSTALL=${FORCE_REINSTALL}"
+      "ALLOW_USED_INBOUND_PORT=${ALLOW_USED_INBOUND_PORT}"
+      "DISK_MIN_MB=${DISK_MIN_MB}"
+      "AUTO_SWAP=${AUTO_SWAP}"
+      "SWAP_SIZE_MB=${SWAP_SIZE_MB}"
+      "SWAP_THRESHOLD_MB=${SWAP_THRESHOLD_MB}"
+      "SWAP_FILE=${SWAP_FILE}"
+      "HYSTERIA_CERT_ONLY=${HYSTERIA_CERT_ONLY}"
+      "SELF_REPO=${SELF_REPO}"
+      "MIRROR_3XUI_REPO=${MIRROR_3XUI_REPO}"
+      "MIRROR_3XUI_TAG=${MIRROR_3XUI_TAG}"
+      "UPSTREAM_3XUI_REPO=${UPSTREAM_3XUI_REPO}"
+      "INSTALL_SOURCE=${INSTALL_SOURCE}"
+      "CHECK_UPSTREAM_UPDATE=${CHECK_UPSTREAM_UPDATE}"
+      "UPDATE_3XUI=${UPDATE_3XUI}"
+      "TMPDIR=${TMPDIR:-}"
+    )
+    log "检测到当前不是 root，正在使用 sudo 自动提权。"
+    exec sudo env "${keep_env[@]}" bash "${script_path}" "$@"
+  fi
+
+  die "当前不是 root，且系统没有 sudo。
+请先切换到 root 后运行:
+  bash ${script_path:-install-vless-reality-3xui.sh}"
 }
 
 require_systemd() {
@@ -181,7 +259,7 @@ require_installed_3xui_for_cert_only() {
     die "--hysteria-cert-only 只用于已经安装好 3x-ui 的服务器。
 
 新机器完整安装请运行:
-  sudo bash install-vless-reality-3xui.sh
+  bash install-vless-reality-3xui.sh
 
 完整安装会自动包含:
   1. 安装 3x-ui 面板
@@ -433,7 +511,7 @@ check_upstream_update() {
   echo "官方上游最新版本: ${latest}"
   if [[ -n "${current}" ]] && version_gt "${latest}" "${current}"; then
     warn "发现新版本。执行下面命令可从上游更新:"
-    echo "sudo bash install-vless-reality-3xui.sh --update-3xui"
+    echo "bash install-vless-reality-3xui.sh --update-3xui"
   elif [[ -n "${current}" ]]; then
     log "当前已是最新或不低于上游最新版本。"
   else
@@ -469,7 +547,7 @@ download_3xui_package() {
   https://github.com/${repo}/releases/tag/${tag}
 
 如果你是临时想直接走官方上游，可以显式执行:
-  sudo env INSTALL_SOURCE=upstream bash install-vless-reality-3xui.sh"
+  env INSTALL_SOURCE=upstream bash install-vless-reality-3xui.sh"
     fi
     die "从官方上游下载 3x-ui 失败: ${url}"
   fi
@@ -948,7 +1026,7 @@ main() {
     return
   fi
 
-  require_root
+  require_root "$@"
 
   if [[ "${HYSTERIA_CERT_ONLY}" == "1" ]]; then
     require_cmd openssl
