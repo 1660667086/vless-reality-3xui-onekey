@@ -449,6 +449,33 @@ select_service_file() {
   find "${extracted_dir}" -maxdepth 1 -type f -name 'x-ui.service*' | sort | head -n 1
 }
 
+write_xui_service_file() {
+  local env_file="/etc/default/x-ui"
+  if command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    env_file="/etc/sysconfig/x-ui"
+  fi
+
+  cat > "${XUI_SERVICE_FILE}" <<EOF
+[Unit]
+Description=x-ui Service
+After=network.target
+Wants=network.target
+
+[Service]
+EnvironmentFile=-${env_file}
+Environment="XRAY_VMESS_AEAD_FORCED=false"
+Type=simple
+WorkingDirectory=${XUI_DIR}/
+ExecStart=${XUI_BIN}
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 644 "${XUI_SERVICE_FILE}"
+}
+
 install_packages() {
   log "正在安装依赖组件"
   if command -v apt-get >/dev/null 2>&1; then
@@ -608,10 +635,14 @@ install_3xui() {
   local source="${1:-${INSTALL_SOURCE}}"
   if [[ -x "${XUI_BIN}" && "${FORCE_REINSTALL}" != "1" ]]; then
     warn "检测到已安装 3x-ui: ${XUI_DIR}，本次会复用它。如需覆盖安装，请设置 FORCE_REINSTALL=1。"
+    write_xui_service_file
+    systemctl daemon-reload
+    systemctl enable x-ui >/dev/null
+    log "已检查并修复 x-ui systemd 服务文件。"
     return
   fi
 
-  local arch tmp_parent tmp pkg service_file
+  local arch tmp_parent tmp pkg
   arch="$(detect_arch)"
   tmp_parent="$(choose_tmp_parent)"
   tmp="$(TMPDIR="${tmp_parent}" mktemp -d)"
@@ -633,14 +664,12 @@ install_3xui() {
 
   tar -xzf "${pkg}" -C "${tmp}"
   [[ -d "${tmp}/x-ui" ]] || die "3x-ui 发布包结构异常，无法继续安装。"
-  service_file="$(select_service_file "${tmp}/x-ui")"
-  [[ -n "${service_file}" && -f "${service_file}" ]] || die "未在 3x-ui 发布包中找到 systemd service 文件。"
 
   chmod +x "${tmp}/x-ui/x-ui" "${tmp}"/x-ui/bin/xray-linux-* "${tmp}/x-ui/x-ui.sh"
   cp -f "${tmp}/x-ui/x-ui.sh" /usr/bin/x-ui
   chmod +x /usr/bin/x-ui
-  cp -f "${service_file}" "${XUI_SERVICE_FILE}"
   mv "${tmp}/x-ui" "${XUI_DIR}"
+  write_xui_service_file
 
   systemctl daemon-reload
   systemctl enable x-ui >/dev/null
